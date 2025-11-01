@@ -1,0 +1,271 @@
+openapi: 3.0.3
+info:
+  title: "API para Agente Inteligente de Citas Personales"
+  description: |-
+    Esta API RESTful gestiona todas las operaciones para el Agente Inteligente, permitiendo la creación y administración de citas, usuarios y preferencias a través de comandos de lenguaje natural.
+    El contrato de la API sirve como la fuente central de verdad para el desarrollo, la documentación y las pruebas del sistema.
+  version: "1.0"
+  contact:
+    name: "Equipo 21 - Tecnológico de Monterrey"
+    email: "A01795975@tec.mx"
+
+servers:
+  - url: "https://api.backendless.com/{application-id}/{rest-api-key}"
+    description: "Servidor de producción de Backendless"
+    variables:
+      application-id:
+        default: "TU_APP_ID"
+        description: "ID de la aplicación en Backendless"
+      rest-api-key:
+        default: "TU_API_KEY"
+        description: "Clave de la API REST de Backendless"
+
+tags:
+  - name: "Gestión de Usuarios"
+    description: "Operaciones relacionadas con la autenticación y gestión de usuarios."
+  - name: "Gestión de Citas"
+    description: "Operaciones CRUD para las citas de los usuarios."
+  - name: "Procesamiento de Comandos"
+    description: "Endpoint principal para procesar lenguaje natural."
+
+paths:
+  # 1. Registrar Usuario
+  /users/register:
+    post:
+      tags:
+        - "Gestión de Usuarios"
+      summary: "Registrar un nuevo usuario"
+      description: "Crea una nueva cuenta de usuario en el sistema."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsuarioRegistro'
+      responses:
+        '200':
+          description: "Usuario registrado exitosamente."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '400':
+          description: "Error en la solicitud. El email ya puede existir o los datos son inválidos."
+
+  # 2. Iniciar Sesión
+  /users/login:
+    post:
+      tags:
+        - "Gestión de Usuarios"
+      summary: "Iniciar sesión de un usuario"
+      description: "Autentica a un usuario y devuelve un token de sesión."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                login:
+                  type: string
+                  description: "Email del usuario."
+                password:
+                  type: string
+                  description: "Contraseña del usuario."
+              required:
+                - login
+                - password
+      responses:
+        '200':
+          description: "Inicio de sesión exitoso."
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Usuario'
+                  - type: object
+                    properties:
+                      user-token:
+                        type: string
+                        description: "Token de autenticación para sesiones posteriores."
+        '401':
+          description: "Credenciales inválidas."
+
+  # 3. Cerrar Sesión
+  /users/logout:
+    get:
+      tags:
+        - "Gestión de Usuarios"
+      summary: "Cerrar la sesión del usuario"
+      description: "Invalida el token de sesión del usuario actual."
+      security:
+        - userToken: []
+      responses:
+        '200':
+          description: "Sesión cerrada exitosamente."
+        '401':
+          description: "No autorizado para realizar esta acción."
+
+  # 4. Procesar Comando de Lenguaje Natural
+  /data/Comando:
+    post:
+      tags:
+        - "Procesamiento de Comandos"
+      summary: "Procesar un comando de lenguaje natural"
+      description: "Recibe un texto (o voz transcrita) y lo procesa para ejecutar una acción, como crear una cita."
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Comando'
+      responses:
+        '201':
+          description: "Comando procesado y acción ejecutada (ej. cita creada)."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensaje:
+                    type: string
+                    example: "Confirmado. He agendado tu 'Revisión dental' para el 20 de octubre a las 4 PM."
+                  resultado:
+                    $ref: '#/components/schemas/Cita'
+        '400':
+          description: "El comando es ambiguo o no se pudo interpretar."
+
+  # 5. Crear una Cita y 6. Obtener todas las Citas
+  /data/Cita:
+    post:
+      tags:
+        - "Gestión de Citas"
+      summary: "Crear una nueva cita"
+      description: "Añade una nueva cita al calendario del usuario. Normalmente se invoca a través del endpoint de comandos."
+      security:
+        - userToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Cita'
+      responses:
+        '201':
+          description: "Cita creada exitosamente."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cita'
+        '400':
+          description: "Datos de la cita inválidos."
+    get:
+      tags:
+        - "Gestión de Citas"
+      summary: "Obtener la lista de citas del usuario"
+      description: "Devuelve todas las citas asociadas a la cuenta del usuario autenticado."
+      security:
+        - userToken: []
+      parameters:
+        - name: "where"
+          in: "query"
+          description: "Cláusula de búsqueda (ej. 'fecha >= TODAY()')."
+          schema:
+            type: string
+      responses:
+        '200':
+          description: "Lista de citas."
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cita'
+        '401':
+          description: "No autorizado."
+
+components:
+  schemas:
+    UsuarioRegistro:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: "Correo electrónico del usuario, usado para el login."
+        password:
+          type: string
+          format: password
+          description: "Contraseña para la cuenta."
+        nombre:
+          type: string
+          description: "Nombre del usuario."
+      required:
+        - email
+        - password
+        - nombre
+
+    Usuario:
+      type: object
+      properties:
+        objectId:
+          type: string
+          description: "ID único del usuario en Backendless."
+        email:
+          type: string
+          format: email
+        nombre:
+          type: string
+        
+    Cita:
+      type: object
+      properties:
+        objectId:
+          type: string
+          description: "ID único de la cita en Backendless."
+        titulo:
+          type: string
+          description: "El nombre o motivo de la cita."
+        fecha:
+          type: string
+          format: date
+          description: "Fecha de la cita (YYYY-MM-DD)."
+        hora_inicio:
+          type: string
+          format: time
+          description: "Hora de inicio de la cita (HH:MM)."
+        lugar:
+          type: string
+          description: "Ubicación de la cita."
+        descripcion:
+          type: string
+          description: "Notas o detalles adicionales."
+        ownerId:
+          type: string
+          description: "ID del usuario propietario de la cita."
+      required:
+        - titulo
+        - fecha
+        - hora_inicio
+
+    Comando:
+      type: object
+      properties:
+        texto:
+          type: string
+          description: "Comando en lenguaje natural proporcionado por el usuario."
+          example: "Agenda una revisión dental para el próximo martes a las 4 PM en el consultorio"
+      required:
+        - texto
+
+  securitySchemes:
+    userToken:
+      type: apiKey
+      in: header
+      name: user-token
+      description: "El token de autenticación del usuario, obtenido tras el login."
+
+security:
+  - userToken: []
