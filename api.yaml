@@ -137,7 +137,7 @@ paths:
         '400':
           description: "El comando es ambiguo o no se pudo interpretar."
 
-  # 5. Crear una Cita
+  # 5. Crear una Cita y 6- Obtener todas las citas
   /data/Cita:
     post:
       tags:
