@@ -137,7 +137,7 @@ paths:
         '400':
           description: "El comando es ambiguo o no se pudo interpretar."
 
-  # 5. Crear una Cita y 6. Obtener todas las Citas
+  # 5. Crear una Cita
   /data/Cita:
     post:
       tags:
@@ -183,6 +183,138 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Cita'
+        '401':
+          description: "No autorizado."
+
+  # 7. Obtener Cita por ID
+  /data/Cita/{id}:
+    get:
+      tags:
+        - "Gestión de Citas"
+      summary: "Obtener una cita específica por ID"
+      description: "Recupera los detalles de una cita usando su identificador único."
+      security:
+        - userToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "ID de la cita."
+      responses:
+        '200':
+          description: "Cita encontrada."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cita'
+        '404':
+          description: "Cita no encontrada."
+        '401':
+          description: "No autorizado."
+
+  # 8. Actualizar Cita
+  /data/Cita/{id}:
+    put:
+      tags:
+        - "Gestión de Citas"
+      summary: "Actualizar una cita existente"
+      description: "Modifica los detalles de una cita existente."
+      security:
+        - userToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "ID de la cita a actualizar."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Cita'
+      responses:
+        '200':
+          description: "Cita actualizada correctamente."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cita'
+        '404':
+          description: "Cita no encontrada."
+        '400':
+          description: "Datos inválidos."
+        '401':
+          description: "No autorizado."
+
+  # 9. Eliminar Cita
+  /data/Cita/{id}:
+    delete:
+      tags:
+        - "Gestión de Citas"
+      summary: "Eliminar una cita"
+      description: "Elimina una cita existente del sistema."
+      security:
+        - userToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "ID de la cita a eliminar."
+      responses:
+        '200':
+          description: "Cita eliminada correctamente."
+        '404':
+          description: "Cita no encontrada."
+        '401':
+          description: "No autorizado."
+
+  # 10. Actualizar Perfil de Usuario
+  /users/{id}:
+    put:
+      tags:
+        - "Gestión de Usuarios"
+      summary: "Actualizar información del usuario"
+      description: "Permite modificar el nombre o correo electrónico del usuario autenticado."
+      security:
+        - userToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: "ID del usuario a actualizar."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre:
+                  type: string
+                  description: "Nuevo nombre del usuario."
+                email:
+                  type: string
+                  format: email
+                  description: "Nuevo correo electrónico (opcional)."
+      responses:
+        '200':
+          description: "Usuario actualizado correctamente."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '404':
+          description: "Usuario no encontrado."
+        '400':
+          description: "Datos inválidos."
         '401':
           description: "No autorizado."
 
