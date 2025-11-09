@@ -1,13 +1,15 @@
 
 from flask import Flask, request, jsonify
 import requests
+import os
 
 app = Flask(__name__)
 
 # --- Configuración de Backendless ---
-# Reemplaza con tus propias credenciales de Backendless
-BACKENDLESS_APP_ID = 'E60A01B9-D08F-4932-915E-F479323571A3'
-BACKENDLESS_REST_API_KEY = '222DE0E2-363D-468A-A5B3-0556E6A62310'
+# Prefer using environment variables for credentials in development/CI.
+# These values fall back to the existing hard-coded values for convenience.
+BACKENDLESS_APP_ID = os.environ.get('BACKENDLESS_APP_ID', 'E60A01B9-D08F-4932-915E-F479323571A3')
+BACKENDLESS_REST_API_KEY = os.environ.get('BACKENDLESS_REST_API_KEY', '222DE0E2-363D-468A-A5B3-0556E6A62310')
 BACKENDLESS_BASE_URL = f"https://api.backendless.com/{BACKENDLESS_APP_ID}/{BACKENDLESS_REST_API_KEY}/data/usuarios"
 
 HEADERS = {

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MNA-Software - Frontend Demo</title>
+    <link rel="stylesheet" href="./css/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>MNA - Frontend Demo</h1>
+      <div class="config">
+        <label>API Base (api.yaml endpoints): <input id="apiBase" value="http://localhost:5000"/></label>
+        <label>Flask Base (app.py endpoints): <input id="flaskBase" value="http://localhost:5000"/></label>
+        <label>User Token: <input id="userToken" placeholder="optional user-token header"/></label>
+        <button id="saveConfig">Save</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="pane">
+        <h2>Authentication</h2>
+        <div class="row">
+          <form id="registerForm">
+            <h3>Register</h3>
+            <input name="nombre" placeholder="Nombre" required />
+            <input name="email" placeholder="Email" required />
+            <input name="password" placeholder="Password" type="password" required />
+            <button type="submit">Register</button>
+          </form>
+
+          <form id="loginForm">
+            <h3>Login</h3>
+            <input name="login" placeholder="Email" required />
+            <input name="password" placeholder="Password" type="password" required />
+            <button type="submit">Login</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="pane">
+        <h2>Process Command</h2>
+        <form id="commandForm">
+          <textarea name="texto" placeholder="Escribe un comando en lenguaje natural" required></textarea>
+          <button type="submit">Send Command</button>
+        </form>
+      </section>
+
+      <section class="pane">
+        <h2>Citas (Appointments)</h2>
+        <form id="createCitaForm">
+          <input name="titulo" placeholder="Titulo" required />
+          <input name="fecha" placeholder="YYYY-MM-DD" required />
+          <input name="hora_inicio" placeholder="HH:MM" required />
+          <input name="lugar" placeholder="Lugar" />
+          <input name="descripcion" placeholder="Descripcion" />
+          <button type="submit">Create Cita</button>
+        </form>
+
+        <div class="cita-controls">
+          <button id="listCitas">List Citas</button>
+          <input id="citaId" placeholder="Cita ID" />
+          <button id="getCita">Get</button>
+          <button id="deleteCita">Delete</button>
+        </div>
+      </section>
+
+      <section class="pane">
+        <h2>Raw Request / Response</h2>
+        <pre id="output"></pre>
+      </section>
+    </main>
+
+    <script src="./js/apiClient.js"></script>
+    <script src="./js/app.js"></script>
+  </body>
+</html>
