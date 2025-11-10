@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Calendar, UserPlus } from 'lucide-react';
+import { Calendar, UserPlus, ArrowLeft } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -9,9 +9,10 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 interface RegisterProps {
   onRegister: (nombre: string, email: string, password: string) => Promise<void>;
   onNavigateToLogin: () => void;
+  onNavigateBack?: () => void;
 }
 
-export function Register({ onRegister, onNavigateToLogin }: RegisterProps) {
+export function Register({ onRegister, onNavigateToLogin, onNavigateBack }: RegisterProps) {
   const [formData, setFormData] = useState({
     nombre: '',
     email: '',
@@ -84,13 +85,24 @@ export function Register({ onRegister, onNavigateToLogin }: RegisterProps) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-md">
+        {/* Back button */}
+        {onNavigateBack && (
+          <button
+            onClick={onNavigateBack}
+            className="mb-6 flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Volver al inicio
+          </button>
+        )}
+
         {/* Logo */}
         <div className="mb-8 flex flex-col items-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary shadow-lg">
             <Calendar className="h-9 w-9 text-primary-foreground" />
           </div>
-          <h1 className="mt-4 text-center font-semibold text-foreground">MNA</h1>
-          <p className="text-center text-sm text-muted-foreground">Agente de Citas</p>
+          <h1 className="mt-4 text-center font-semibold text-foreground">Agente de Citas</h1>
+          <p className="text-center text-sm text-muted-foreground">Inteligente y personal</p>
         </div>
 
         {/* Register card */}

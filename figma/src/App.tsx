@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Toaster, toast } from 'sonner@2.0.3';
 import { Header } from './components/Header';
+import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
@@ -9,7 +10,7 @@ import { CitaDetail } from './pages/CitaDetail';
 import { Settings } from './pages/Settings';
 import api, { getUserData, type Usuario, type Cita } from './utils/api';
 
-type Page = 'login' | 'register' | 'dashboard' | 'citas' | 'cita-detail' | 'settings';
+type Page = 'landing' | 'login' | 'register' | 'dashboard' | 'citas' | 'cita-detail' | 'settings';
 
 interface PageState {
   current: Page;
@@ -18,7 +19,7 @@ interface PageState {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
-  const [pageState, setPageState] = useState<PageState>({ current: 'login' });
+  const [pageState, setPageState] = useState<PageState>({ current: 'landing' });
   const [citas, setCitas] = useState<Cita[]>([]);
   const [isLoadingCitas, setIsLoadingCitas] = useState(false);
 
@@ -80,7 +81,7 @@ export default function App() {
     }
     setCurrentUser(null);
     setCitas([]);
-    setPageState({ current: 'login' });
+    setPageState({ current: 'landing' });
     toast.success('Sesión cerrada');
   };
 
@@ -126,13 +127,22 @@ export default function App() {
           <Register
             onRegister={handleRegister}
             onNavigateToLogin={() => setPageState({ current: 'login' })}
+            onNavigateBack={() => setPageState({ current: 'landing' })}
+          />
+        );
+      }
+      if (pageState.current === 'login') {
+        return (
+          <Login
+            onLogin={handleLogin}
+            onNavigateToRegister={() => setPageState({ current: 'register' })}
+            onNavigateBack={() => setPageState({ current: 'landing' })}
           />
         );
       }
       return (
-        <Login
-          onLogin={handleLogin}
-          onNavigateToRegister={() => setPageState({ current: 'register' })}
+        <Landing
+          onNavigateToLogin={() => setPageState({ current: 'login' })}
         />
       );
     }

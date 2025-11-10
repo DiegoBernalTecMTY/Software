@@ -1,52 +1,299 @@
-// Minimal API client based on api.yaml
-const API_BASE_URL = (typeof window !== 'undefined' && localStorage.getItem('apiBase')) || 'http://localhost:5000'
+/**
+ * MNA API Client
+ * Handles all API communication with the Backendless backend
+ * via the Flask proxy at http://localhost:5000
+ */
 
-export interface Usuario { objectId?: string; email: string; nombre: string }
-export interface Cita { objectId?: string; titulo: string; fecha: string; hora_inicio: string; lugar?: string; descripcion?: string }
-export interface LoginResponse { objectId: string; email: string; nombre: string; 'user-token': string }
-export interface CommandResponse { mensaje: string; resultado?: Cita }
+const API_BASE_URL = 'http://localhost:5000';
 
-function getAuthToken(): string | null { if (typeof window !== 'undefined') return localStorage.getItem('user-token'); return null }
-function setAuthToken(t: string) { if (typeof window !== 'undefined') localStorage.setItem('user-token', t) }
-function setUserData(u: Usuario) { if (typeof window !== 'undefined') localStorage.setItem('user-data', JSON.stringify(u)) }
-export function getUserData(): Usuario | null { if (typeof window !== 'undefined') { const d = localStorage.getItem('user-data'); return d ? JSON.parse(d) : null } return null }
-function clearAuth() { if (typeof window !== 'undefined') { localStorage.removeItem('user-token'); localStorage.removeItem('user-data') } }
+// Type definitions matching the API contract
+export interface Usuario {
+  objectId?: string;
+  email: string;
+  nombre: string;
+  created?: string;
+  updated?: string;
+}
 
-async function apiFetch<T>(endpoint: string, opts: RequestInit = {}): Promise<T> {
-  const headers: Record<string,string> = { 'Content-Type': 'application/json', ...(opts.headers as any || {}) }
-  const token = getAuthToken()
-  if (token) headers['user-token'] = token
-  const res = await fetch(`${API_BASE_URL}${endpoint}`, { ...opts, headers })
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '')
-    throw new Error(`HTTP ${res.status} ${txt}`)
+export interface Cita {
+  objectId?: string;
+  titulo: string;
+  fecha: string; // YYYY-MM-DD
+  hora_inicio: string; // HH:MM
+  lugar: string;
+  descripcion?: string;
+  owner?: string;
+  created?: string;
+  updated?: string;
+}
+
+export interface LoginResponse {
+  objectId: string;
+  email: string;
+  nombre: string;
+  'user-token': string;
+}
+
+export interface CommandResponse {
+  mensaje: string;
+  resultado?: Cita | any;
+}
+
+export interface ApiError {
+  code?: number;
+  message: string;
+}
+
+/**
+ * Get the stored auth token
+ */
+export function getAuthToken(): string | null {
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem('user-token');
   }
-  const text = await res.text()
-  try { return JSON.parse(text) } catch { return text as unknown as T }
+  return null;
 }
 
+/**
+ * Store auth token
+ */
+export function setAuthToken(token: string): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('user-token', token);
+  }
+}
+
+/**
+ * Clear auth token
+ */
+export function clearAuthToken(): void {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('user-token');
+    localStorage.removeItem('user-data');
+  }
+}
+
+/**
+ * Get stored user data
+ */
+export function getUserData(): Usuario | null {
+  if (typeof window !== 'undefined') {
+    const data = localStorage.getItem('user-data');
+    return data ? JSON.parse(data) : null;
+  }
+  return null;
+}
+
+/**
+ * Store user data
+ */
+export function setUserData(user: Usuario): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('user-data', JSON.stringify(user));
+  }
+}
+
+/**
+ * Base fetch wrapper with auth header injection
+ */
+async function apiFetch<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const token = getAuthToken();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  };
+
+  if (token) {
+    headers['user-token'] = token;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw {
+        code: response.status,
+        message: errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+      } as ApiError;
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error.code) {
+      throw error;
+    }
+    throw {
+      code: 0,
+      message: error.message || 'Error de conexión. Por favor, verifica tu conexión a internet.',
+    } as ApiError;
+  }
+}
+
+/**
+ * Auth API
+ */
 export const authApi = {
-  register: async (payload: { email: string; password: string; nombre: string }) => apiFetch<Usuario>('/users/register', { method: 'POST', body: JSON.stringify(payload) }),
-  login: async (payload: { login: string; password: string }) => {
-    const res = await apiFetch<LoginResponse>('/users/login', { method: 'POST', body: JSON.stringify(payload) })
-    if (res['user-token']) setAuthToken(res['user-token'])
-    setUserData({ objectId: res.objectId, email: res.email, nombre: res.nombre })
-    return res
+  /**
+   * Register a new user
+   * POST /users/register
+   */
+  register: async (payload: {
+    email: string;
+    password: string;
+    nombre: string;
+  }): Promise<Usuario> => {
+    return apiFetch<Usuario>('/users/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   },
-  logout: async () => { await apiFetch('/users/logout', { method: 'GET' }); clearAuth() },
-  updateUser: async (id: string, payload: Partial<Usuario>) => apiFetch<Usuario>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
-}
 
+  /**
+   * Login user
+   * POST /users/login
+   */
+  login: async (payload: {
+    login: string;
+    password: string;
+  }): Promise<LoginResponse> => {
+    const response = await apiFetch<LoginResponse>('/users/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    
+    // Store token and user data
+    if (response['user-token']) {
+      setAuthToken(response['user-token']);
+      setUserData({
+        objectId: response.objectId,
+        email: response.email,
+        nombre: response.nombre,
+      });
+    }
+    
+    return response;
+  },
+
+  /**
+   * Logout user
+   * GET /users/logout
+   */
+  logout: async (): Promise<void> => {
+    await apiFetch<void>('/users/logout', {
+      method: 'GET',
+    });
+    clearAuthToken();
+  },
+
+  /**
+   * Update user profile
+   * PUT /users/{id}
+   */
+  updateUser: async (id: string, payload: Partial<Usuario>): Promise<Usuario> => {
+    const response = await apiFetch<Usuario>(`/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    
+    // Update stored user data
+    const currentUser = getUserData();
+    if (currentUser) {
+      setUserData({ ...currentUser, ...response });
+    }
+    
+    return response;
+  },
+};
+
+/**
+ * Citas API
+ */
 export const citasApi = {
-  create: async (payload: Partial<Cita>) => apiFetch<Cita>('/data/Cita', { method: 'POST', body: JSON.stringify(payload) }),
-  list: async (where?: string) => apiFetch<Cita[]>(`/data/Cita${where ? '?where=' + encodeURIComponent(where) : ''}`),
-  get: async (id: string) => apiFetch<Cita>(`/data/Cita/${id}`),
-  update: async (id: string, payload: Partial<Cita>) => apiFetch<Cita>(`/data/Cita/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
-  delete: async (id: string) => apiFetch<void>(`/data/Cita/${id}`, { method: 'DELETE' })
-}
+  /**
+   * Create a new cita
+   * POST /data/Cita
+   */
+  create: async (payload: {
+    titulo: string;
+    fecha: string;
+    hora_inicio: string;
+    lugar: string;
+    descripcion?: string;
+  }): Promise<Cita> => {
+    return apiFetch<Cita>('/data/Cita', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 
+  /**
+   * Get list of citas
+   * GET /data/Cita?where=...
+   */
+  list: async (where?: string): Promise<Cita[]> => {
+    const queryParams = where ? `?where=${encodeURIComponent(where)}` : '';
+    return apiFetch<Cita[]>(`/data/Cita${queryParams}`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Get a single cita by ID
+   * GET /data/Cita/{id}
+   */
+  get: async (id: string): Promise<Cita> => {
+    return apiFetch<Cita>(`/data/Cita/${id}`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Update a cita
+   * PUT /data/Cita/{id}
+   */
+  update: async (id: string, payload: Partial<Cita>): Promise<Cita> => {
+    return apiFetch<Cita>(`/data/Cita/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * Delete a cita
+   * DELETE /data/Cita/{id}
+   */
+  delete: async (id: string): Promise<void> => {
+    return apiFetch<void>(`/data/Cita/${id}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+/**
+ * Command API (Natural Language Processing)
+ */
 export const commandApi = {
-  process: async (texto: string) => apiFetch<CommandResponse>('/data/Comando', { method: 'POST', body: JSON.stringify({ texto }) })
-}
+  /**
+   * Process a natural language command
+   * POST /data/Comando
+   */
+  process: async (texto: string): Promise<CommandResponse> => {
+    return apiFetch<CommandResponse>('/data/Comando', {
+      method: 'POST',
+      body: JSON.stringify({ texto }),
+    });
+  },
+};
 
-export default { auth: authApi, citas: citasApi, command: commandApi }
+export default {
+  auth: authApi,
+  citas: citasApi,
+  command: commandApi,
+};

@@ -41,8 +41,8 @@ export function Header({ user, onNavigate, onLogout }: HeaderProps) {
             <Calendar className="h-5 w-5 text-primary-foreground" />
           </div>
           <div className="flex flex-col">
-            <span className="font-semibold text-foreground">MNA</span>
-            <span className="text-xs text-muted-foreground">Agente de Citas</span>
+            <span className="font-semibold text-foreground">Agente de Citas</span>
+            <span className="text-xs text-muted-foreground">Inteligente y personal</span>
           </div>
         </button>
 
