@@ -7,6 +7,14 @@ except Exception:
     CORS = None
 import requests
 import os
+import json
+import re
+
+# AI helper (Gemini / LangChain scaffold)
+try:
+    from ai import process_command as ai_process_command
+except Exception:
+    ai_process_command = None
 
 app = Flask(__name__)
 
@@ -53,6 +61,44 @@ BACKENDLESS_USUARIOS_TABLE = f"{BACKENDLESS_BASE_URL}/data/usuarios"
 # Note: your Backendless tables are named `usuarios` and `citas` in the Console.
 # Use the exact table name (`citas`) for the Cita table.
 BACKENDLESS_CITA_TABLE = f"{BACKENDLESS_BASE_URL}/data/citas"
+
+
+def _search_citas_by_query(query: str, limit: int = 10):
+    """Try to find candidate citas that match a natural-language query.
+
+    This is a simple heuristic: build a `where` clause searching the `titulo`
+    and `descripcion` fields for keywords extracted from the query. Returns a
+    list of candidate dicts with keys: id (objectId), titulo, fecha, hora_inicio, snippet.
+    """
+    if not query:
+        return []
+    # crude keyword extraction: remove small stopwords and take top keywords
+    kws = [w for w in re.findall(r"[\wáéíóúñÑ]+", query.lower()) if len(w) > 2]
+    stop = {'con', 'el', 'la', 'los', 'las', 'a', 'en', 'de', 'del', 'para', 'por', 'que', 'este', 'esta', 'próximo', 'próxima', 'siguiente', 'un', 'una'}
+    kws = [k for k in kws if k not in stop]
+    if not kws:
+        return []
+    clauses = []
+    for k in kws[:5]:
+        clauses.append(f"titulo LIKE '%{k}%'")
+        clauses.append(f"descripcion LIKE '%{k}%'")
+    where = ' OR '.join(clauses)
+    try:
+        r = requests.get(BACKENDLESS_CITA_TABLE, headers=HEADERS, params={'where': where, 'pageSize': limit}, timeout=10)
+        r.raise_for_status()
+        found = r.json() or []
+        candidates = []
+        for rec in found:
+            candidates.append({
+                'id': rec.get('objectId') or rec.get('id'),
+                'titulo': rec.get('titulo'),
+                'fecha': rec.get('fecha'),
+                'hora_inicio': rec.get('hora_inicio'),
+                'snippet': f"{rec.get('titulo','')} - {rec.get('fecha','')} {rec.get('hora_inicio','')}",
+            })
+        return candidates
+    except Exception:
+        return []
 
 # --- Servicios CRUD ---
 
@@ -352,8 +398,86 @@ def delete_cita(id):
 def process_comando():
     data = request.json
     texto = data.get('texto') if data else ''
-    # Naive implementation: echo back the command and return no created cita.
+    confirm = bool(data.get('confirm')) if data else False
+    # If AI helper is available, use it to parse intent and produce structured result.
+    if ai_process_command:
+        try:
+            parsed = ai_process_command(texto)
+            # Ensure parsed is JSON-serializable
+            # If caller requested confirmation execution and the AI parsed a create/update/delete,
+            # attempt to perform the action against Backendless (server-side execution).
+            if confirm and isinstance(parsed, dict):
+                action = parsed.get('action')
+                resultado = parsed.get('resultado')
+                # Forward user-token if present so Backendless sets ownerId
+                headers = dict(HEADERS)
+                token = request.headers.get('user-token')
+                if token:
+                    headers['user-token'] = token
+
+                # CREATE (existing behavior)
+                if action == 'create' and resultado and isinstance(resultado, dict):
+                    try:
+                        resp = requests.post(BACKENDLESS_CITA_TABLE, json=resultado, headers=headers)
+                        resp.raise_for_status()
+                        created = resp.json()
+                        parsed['executed'] = {'status': 'created', 'record': created}
+                        return jsonify(parsed), 201
+                    except requests.exceptions.RequestException as e:
+                        parsed['executed'] = {'status': 'error', 'message': str(e)}
+                        return jsonify(parsed), 500
+
+                # UPDATE: accept either 'updates' (partial) or 'resultado' (full)
+                if action == 'update':
+                    target = parsed.get('target_id')
+                    body = parsed.get('updates') or resultado
+                    if not target:
+                        # No target id: if query provided, search and return candidates for clarification
+                        if parsed.get('query'):
+                            parsed['candidates'] = _search_citas_by_query(parsed.get('query'))
+                            return jsonify(parsed), 200
+                        parsed['executed'] = {'status': 'error', 'message': 'target_id missing for update'}
+                        return jsonify(parsed), 400
+                    if not body:
+                        parsed['executed'] = {'status': 'error', 'message': 'no updates provided for update'}
+                        return jsonify(parsed), 400
+                    try:
+                        resp = requests.put(f"{BACKENDLESS_CITA_TABLE}/{target}", json=body, headers=headers)
+                        resp.raise_for_status()
+                        updated = resp.json()
+                        parsed['executed'] = {'status': 'updated', 'record': updated}
+                        return jsonify(parsed), 200
+                    except requests.exceptions.RequestException as e:
+                        parsed['executed'] = {'status': 'error', 'message': str(e)}
+                        return jsonify(parsed), 500
+
+                # DELETE: require target_id; if missing try query -> candidates
+                if action == 'delete':
+                    target = parsed.get('target_id')
+                    if not target:
+                        if parsed.get('query'):
+                            parsed['candidates'] = _search_citas_by_query(parsed.get('query'))
+                            return jsonify(parsed), 200
+                        parsed['executed'] = {'status': 'error', 'message': 'target_id missing for delete'}
+                        return jsonify(parsed), 400
+                    try:
+                        resp = requests.delete(f"{BACKENDLESS_CITA_TABLE}/{target}", headers=headers)
+                        resp.raise_for_status()
+                        parsed['executed'] = {'status': 'deleted'}
+                        return jsonify(parsed), 200
+                    except requests.exceptions.RequestException as e:
+                        parsed['executed'] = {'status': 'error', 'message': str(e)}
+                        return jsonify(parsed), 500
+
+            # If not confirming execution, or confirm==False, just return the parsed suggestion
+            return jsonify(parsed), 200
+        except Exception as e:
+            # Return model error to frontend so it can display a helpful message
+            return jsonify({"action": "none", "mensaje": f"Error al procesar comando: {str(e)}", "resultado": None}), 500
+
+    # Fallback: naive echo
     result = {
+        "action": "none",
         "mensaje": f"Comando recibido: {texto}",
         "resultado": None
     }

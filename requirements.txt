@@ -1,3 +1,7 @@
 Flask>=2.2,<3
 requests>=2.28,<3
 flask-cors>=3.0.10
+# Optional / recommended for AI command processing (install to enable Gemini + LangChain support)
+langchain
+google-genai
+python-dotenv>=1.0.0

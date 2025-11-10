@@ -106,8 +106,8 @@ fetch(`${API_BASE}/usuarios`)
 
 ## Variables importantes
 
-- BACKENDLESS_APP_ID — (opcional) ID de la app Backendless.
-- BACKENDLESS_REST_API_KEY — (opcional) API key REST de Backendless.
+- BACKENDLESS_APP_ID — ID de la app Backendless.
+- BACKENDLESS_REST_API_KEY — API key REST de Backendless.
 
 Puede exportarlas en PowerShell (solo afectan a la sesión actual):
 
@@ -115,6 +115,29 @@ Puede exportarlas en PowerShell (solo afectan a la sesión actual):
 $env:BACKENDLESS_APP_ID = "E60A01B9-D08F-4932-915E-F479323571A3"
 $env:BACKENDLESS_REST_API_KEY = "222DE0E2-363D-468A-A5B3-0556E6A62310"
 $env:GEMINI_API_KEY = 'AIzaSyAEN0UKlfsesw2GWkkhASxy4G2dvDE2AoU'
+$env:GROQ_API_KEY = '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'
+$env:GEN_MODEL = 'gemini-2.5-flash-lite'
+
+### AI command processing (Gemini + LangChain readiness)
+
+This project includes a simple AI adapter at `ai.py` that calls Google Generative models (Gemini/text-bison)
+to interpret natural-language commands into a structured JSON description of the desired action.
+
+To enable it for local development:
+
+1. Install the optional AI dependencies (recommended):
+
+```powershell
+pip install -r requirements.txt
+```
+
+2. Make sure the `GEMINI_API_KEY` env var is set in your shell (example above). The repository contains a sample key for quick testing only — do not use it in production.
+
+3. Start the backend and frontend as usual. In the Dashboard click "Centro de comandos" and type a command in Spanish. The backend will call the generative API and return a suggested interpretation; press "Confirmar" in the UI to actually create/update the appointment.
+
+Notes:
+- `ai.py` currently uses a direct REST fallback to the Generative API for robustness. It includes a prompt and output contract designed to be easily replaced by a LangChain/LangGraph chain in the future.
+- For production usage, store your API keys securely (environment variables, secrets manager) and avoid committing them to git.
 ```
 
 Si no las define, `app.py` usa valores de fallback escritos en el archivo (útiles para pruebas locales).
