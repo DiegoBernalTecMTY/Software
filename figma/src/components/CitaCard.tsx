@@ -1,0 +1,155 @@
+import { Calendar, Clock, MapPin, MoreVertical, Edit, Trash2 } from 'lucide-react';
+import { Card, CardContent, CardHeader } from './ui/card';
+import { Button } from './ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
+import { Badge } from './ui/badge';
+import type { Cita } from '../utils/api';
+
+interface CitaCardProps {
+  cita: Cita;
+  onEdit?: (cita: Cita) => void;
+  onDelete?: (cita: Cita) => void;
+  onClick?: (cita: Cita) => void;
+  variant?: 'default' | 'compact';
+}
+
+export function CitaCard({ cita, onEdit, onDelete, onClick, variant = 'default' }: CitaCardProps) {
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr + 'T00:00:00');
+    return date.toLocaleDateString('es-ES', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
+  const isUpcoming = (dateStr: string, timeStr: string) => {
+    const citaDateTime = new Date(`${dateStr}T${timeStr}:00`);
+    return citaDateTime > new Date();
+  };
+
+  const isPast = (dateStr: string, timeStr: string) => {
+    const citaDateTime = new Date(`${dateStr}T${timeStr}:00`);
+    return citaDateTime < new Date();
+  };
+
+  const upcoming = isUpcoming(cita.fecha, cita.hora_inicio);
+  const past = isPast(cita.fecha, cita.hora_inicio);
+
+  if (variant === 'compact') {
+    return (
+      <div
+        onClick={() => onClick?.(cita)}
+        className="group flex cursor-pointer items-start gap-3 rounded-lg border bg-card p-3 transition-all hover:border-primary/40 hover:shadow-md"
+      >
+        <div className="flex flex-col items-center rounded-md bg-primary/10 px-2 py-1">
+          <span className="text-xs text-primary">
+            {new Date(cita.fecha + 'T00:00:00').toLocaleDateString('es-ES', { month: 'short' })}
+          </span>
+          <span className="font-semibold text-primary">
+            {new Date(cita.fecha + 'T00:00:00').getDate()}
+          </span>
+        </div>
+        <div className="flex-1">
+          <h4 className="font-medium text-foreground group-hover:text-primary">{cita.titulo}</h4>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {cita.hora_inicio}
+            </span>
+            {cita.lugar && (
+              <span className="flex items-center gap-1">
+                <MapPin className="h-3 w-3" />
+                {cita.lugar}
+              </span>
+            )}
+          </div>
+        </div>
+        {(upcoming || past) && (
+          <Badge variant={upcoming ? 'default' : 'secondary'} className="text-xs">
+            {upcoming ? 'Próxima' : 'Pasada'}
+          </Badge>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <Card className="group transition-all hover:border-primary/40 hover:shadow-md">
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+        <div className="flex-1">
+          <h3
+            onClick={() => onClick?.(cita)}
+            className="cursor-pointer font-semibold text-foreground group-hover:text-primary"
+          >
+            {cita.titulo}
+          </h3>
+          <div className="mt-2 flex flex-wrap gap-2 text-sm text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <Calendar className="h-4 w-4" />
+              {formatDate(cita.fecha)}
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock className="h-4 w-4" />
+              {cita.hora_inicio}
+            </span>
+          </div>
+        </div>
+        {(onEdit || onDelete) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                <MoreVertical className="h-4 w-4" />
+                <span className="sr-only">Opciones</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {onEdit && (
+                <DropdownMenuItem onClick={() => onEdit(cita)} className="cursor-pointer">
+                  <Edit className="mr-2 h-4 w-4" />
+                  <span>Editar</span>
+                </DropdownMenuItem>
+              )}
+              {onDelete && (
+                <DropdownMenuItem
+                  onClick={() => onDelete(cita)}
+                  className="cursor-pointer text-destructive"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  <span>Eliminar</span>
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </CardHeader>
+      <CardContent>
+        {cita.lugar && (
+          <div className="mb-2 flex items-center gap-1 text-sm text-muted-foreground">
+            <MapPin className="h-4 w-4" />
+            {cita.lugar}
+          </div>
+        )}
+        {cita.descripcion && <p className="text-sm text-muted-foreground">{cita.descripcion}</p>}
+        <div className="mt-3 flex gap-2">
+          {upcoming && (
+            <Badge variant="default" className="text-xs">
+              Próxima
+            </Badge>
+          )}
+          {past && (
+            <Badge variant="secondary" className="text-xs">
+              Pasada
+            </Badge>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

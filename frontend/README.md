@@ -1,3 +1,31 @@
+# Frontend (React) — MNA
+
+This folder contains a trimmed React + Vite frontend that implements the core flows and maps to the API contract in `api.yaml`.
+
+How to run (PowerShell):
+
+1. Install dependencies:
+
+```powershell
+cd C:\MNA-Software\frontend
+npm install
+```
+
+2. Run the dev server:
+
+```powershell
+npm run dev
+# Opens http://localhost:3000 by default
+```
+
+Configuration:
+- The app calls `http://localhost:5000` by default (the Flask proxy in `app.py`). You can change the base by setting localStorage key `apiBase` in the browser or editing `src/utils/api.ts`.
+- The login returns a `user-token` header which the client stores in localStorage as `user-token` for authenticated requests.
+
+Next steps I can take:
+- Add full component set from the Figma export (we kept a small set for quicker run ability).
+- Add TypeScript types and unit tests.
+- Wire up more pages/components from the Figma source if you want a 1:1 copy.
 # Frontend demo for MNA-Software
 
 This is a small static frontend to exercise the backend services declared in `api.yaml` and the local `app.py` Flask server.
