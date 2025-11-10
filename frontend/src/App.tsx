@@ -43,7 +43,10 @@ export default function App() {
   const loadCitas = async () => {
     setIsLoadingCitas(true);
     try {
-      const data = await api.citas.list();
+      // Only load citas belonging to the current user (filter by ownerId)
+      const me = getUserData();
+      const where = me && me.objectId ? `ownerId = '${me.objectId}'` : undefined;
+      const data = await api.citas.list(where);
       setCitas(data);
     } catch (error: any) {
       console.error('Error loading citas:', error);

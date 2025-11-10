@@ -62,6 +62,9 @@ export function Header({ user, onNavigate, onLogout }: HeaderProps) {
                   variant="ghost"
                   className="relative h-10 w-10 rounded-full"
                   aria-label="Menú de usuario"
+                  // Temporary debug hook: log clicks to help diagnose dropdown issues
+                  onClick={() => console.debug('Header avatar clicked')}
+                  data-testid="header-avatar-button"
                 >
                   <Avatar className="h-10 w-10 border-2 border-primary/20">
                     <AvatarFallback className="bg-primary text-primary-foreground">
@@ -88,7 +91,15 @@ export function Header({ user, onNavigate, onLogout }: HeaderProps) {
                   <span>Configuración</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={onLogout} className="cursor-pointer text-destructive">
+                <DropdownMenuItem
+                  onClick={() => {
+                    // Ask for confirmation before logging out
+                    // Use a simple confirm dialog to avoid adding extra UI dependencies
+                    const ok = window.confirm('¿Cerrar sesión?');
+                    if (ok) onLogout();
+                  }}
+                  className="cursor-pointer text-destructive"
+                >
                   <LogOut className="mr-2 h-4 w-4" />
                   <span>Cerrar sesión</span>
                 </DropdownMenuItem>
