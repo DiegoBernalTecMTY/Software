@@ -2,14 +2,8 @@ import { useState } from 'react';
 import { Calendar, LogOut, Settings, User } from 'lucide-react';
 import { Avatar, AvatarFallback } from './ui/avatar';
 import { Button } from './ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Separator } from './ui/separator';
 import type { Usuario } from '../utils/api';
 
 interface HeaderProps {
@@ -19,6 +13,8 @@ interface HeaderProps {
 }
 
 export function Header({ user, onNavigate, onLogout }: HeaderProps) {
+  const [isOpen, setIsOpen] = useState(false);
+
   const getInitials = (name: string) => {
     return name
       .split(' ')
@@ -26,6 +22,16 @@ export function Header({ user, onNavigate, onLogout }: HeaderProps) {
       .join('')
       .toUpperCase()
       .slice(0, 2);
+  };
+
+  const handleNavigate = (page: string) => {
+    setIsOpen(false);
+    onNavigate(page);
+  };
+
+  const handleLogout = () => {
+    setIsOpen(false);
+    onLogout();
   };
 
   return (
@@ -56,8 +62,8 @@ export function Header({ user, onNavigate, onLogout }: HeaderProps) {
             </div>
 
             {/* User dropdown menu */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <Popover open={isOpen} onOpenChange={setIsOpen}>
+              <PopoverTrigger asChild>
                 <Button
                   variant="ghost"
                   className="relative h-10 w-10 rounded-full"
@@ -69,31 +75,36 @@ export function Header({ user, onNavigate, onLogout }: HeaderProps) {
                     </AvatarFallback>
                   </Avatar>
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56" align="end">
-                <DropdownMenuLabel>Mi Cuenta</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => onNavigate('dashboard')}
-                  className="cursor-pointer"
-                >
-                  <Calendar className="mr-2 h-4 w-4" />
-                  <span>Panel principal</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => onNavigate('settings')}
-                  className="cursor-pointer"
-                >
-                  <Settings className="mr-2 h-4 w-4" />
-                  <span>Configuración</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={onLogout} className="cursor-pointer text-destructive">
-                  <LogOut className="mr-2 h-4 w-4" />
-                  <span>Cerrar sesión</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-0" align="end" sideOffset={8}>
+                <div className="p-2">
+                  <div className="px-2 py-1.5 text-sm font-medium">Mi Cuenta</div>
+                  <Separator className="my-1" />
+                  <button
+                    onClick={() => handleNavigate('dashboard')}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent focus:bg-accent"
+                  >
+                    <Calendar className="h-4 w-4" />
+                    <span>Panel principal</span>
+                  </button>
+                  <button
+                    onClick={() => handleNavigate('settings')}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent focus:bg-accent"
+                  >
+                    <Settings className="h-4 w-4" />
+                    <span>Configuración</span>
+                  </button>
+                  <Separator className="my-1" />
+                  <button
+                    onClick={handleLogout}
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive outline-none transition-colors hover:bg-destructive/10 focus:bg-destructive/10"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span>Cerrar sesión</span>
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         )}
       </div>

@@ -65,6 +65,7 @@
   :root, :host {
     --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --color-blue-500: oklch(.623 .214 259.815);
     --color-gray-100: oklch(.967 .003 264.542);
     --color-black: #000;
     --color-white: #fff;
@@ -815,6 +816,10 @@
     width: calc(var(--spacing) * 56);
   }
 
+  .w-72 {
+    width: calc(var(--spacing) * 72);
+  }
+
   .w-fit {
     width: fit-content;
   }
@@ -861,6 +866,10 @@
 
   .origin-\(--radix-dropdown-menu-content-transform-origin\) {
     transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+  }
+
+  .origin-\(--radix-popover-content-transform-origin\) {
+    transform-origin: var(--radix-popover-content-transform-origin);
   }
 
   .translate-x-\[-50\%\] {
@@ -1166,6 +1175,10 @@
     border-color: #0000;
   }
 
+  .bg-\[\#0078D4\] {
+    background-color: #0078d4;
+  }
+
   .bg-accent {
     background-color: var(--accent);
   }
@@ -1192,6 +1205,10 @@
     .bg-black\/50 {
       background-color: color-mix(in oklab, var(--color-black) 50%, transparent);
     }
+  }
+
+  .bg-blue-500 {
+    background-color: var(--color-blue-500);
   }
 
   .bg-border {
@@ -1379,6 +1396,10 @@
 
   .p-1 {
     padding: calc(var(--spacing) * 1);
+  }
+
+  .p-2 {
+    padding: calc(var(--spacing) * 2);
   }
 
   .p-3 {
@@ -1795,6 +1816,18 @@
   }
 
   @media (hover: hover) {
+    .hover\:bg-destructive\/10:hover {
+      background-color: var(--destructive);
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+      .hover\:bg-destructive\/10:hover {
+        background-color: color-mix(in oklab, var(--destructive) 10%, transparent);
+      }
+    }
+  }
+
+  @media (hover: hover) {
     .hover\:bg-destructive\/90:hover {
       background-color: var(--destructive);
     }
@@ -1900,6 +1933,16 @@
 
   .focus\:bg-accent:focus {
     background-color: var(--accent);
+  }
+
+  .focus\:bg-destructive\/10:focus {
+    background-color: var(--destructive);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .focus\:bg-destructive\/10:focus {
+      background-color: color-mix(in oklab, var(--destructive) 10%, transparent);
+    }
   }
 
   .focus\:text-accent-foreground:focus {

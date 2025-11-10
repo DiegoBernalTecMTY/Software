@@ -107,7 +107,7 @@ async function apiFetch<T>(
   };
 
   if (token) {
-    (headers as any)['user-token'] = token;
+    headers['user-token'] = token;
   }
 
   try {
@@ -214,22 +214,17 @@ export const authApi = {
 
 // Helpers
 function normalizeFecha(value: any): string {
-  // Backendless may return a numeric timestamp (ms) or an ISO string.
+  // Backend may return numeric timestamp (ms) or ISO string. Normalize to YYYY-MM-DD.
   if (!value && value !== 0) return '';
-  // If it's a number (or numeric string), treat as ms since epoch
   const asNumber = typeof value === 'number' ? value : (typeof value === 'string' && /^\d+$/.test(value) ? parseInt(value, 10) : NaN);
   if (!Number.isNaN(asNumber)) {
-    try {
-      const d = new Date(asNumber);
-      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-    } catch (e) {}
+    const d = new Date(asNumber);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   }
-  // If it's an ISO date string, extract YYYY-MM-DD
   try {
     const d = new Date(value);
     if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   } catch (e) {}
-  // Fallback to string cast
   return String(value);
 }
 
@@ -252,10 +247,7 @@ export const citasApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    // Normalize fecha to YYYY-MM-DD if backend returned a numeric timestamp
-    if (res && (res as any).fecha) {
-      (res as any).fecha = normalizeFecha((res as any).fecha);
-    }
+    if (res && (res as any).fecha) (res as any).fecha = normalizeFecha((res as any).fecha);
     return res;
   },
 
@@ -264,11 +256,22 @@ export const citasApi = {
    * GET /data/Cita?where=...
    */
   list: async (where?: string): Promise<Cita[]> => {
-    const queryParams = where ? `?where=${encodeURIComponent(where)}` : '';
+    // If caller provided a where clause, use it. Otherwise, restrict to current user's citas.
+    let queryWhere = where;
+    const currentUser = getUserData();
+    if (!queryWhere) {
+      if (currentUser && currentUser.objectId) {
+        // Prefer filtering by ownerId which Backendless sets for the record owner.
+        queryWhere = `ownerId='${currentUser.objectId}'`;
+      } else {
+        // No logged user -> return empty list rather than all citas
+        return [];
+      }
+    }
+    const queryParams = queryWhere ? `?where=${encodeURIComponent(queryWhere)}` : '';
     const res = await apiFetch<Cita[]>(`/data/Cita${queryParams}`, {
       method: 'GET',
     });
-    // Normalize fecha on each item
     if (Array.isArray(res)) {
       return res.map((c) => ({ ...c, fecha: normalizeFecha((c as any).fecha) }));
     }

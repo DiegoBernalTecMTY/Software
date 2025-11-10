@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { User, Save } from 'lucide-react';
+import { User, Save, Calendar, CheckCircle2, Link2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Separator } from '../components/ui/separator';
+import { toast } from 'sonner@2.0.3';
 import type { Usuario } from '../utils/api';
 
 interface SettingsProps {
@@ -22,6 +23,11 @@ export function Settings({ user, onUpdateUser, onRefreshUser }: SettingsProps) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  
+  // Calendar integration states
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [outlookConnected, setOutlookConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState<'google' | 'outlook' | null>(null);
 
   useEffect(() => {
     setFormData({
@@ -88,6 +94,44 @@ export function Settings({ user, onUpdateUser, onRefreshUser }: SettingsProps) {
         return newErrors;
       });
     }
+  };
+
+  const handleConnectGoogle = async () => {
+    setIsConnecting('google');
+    try {
+      // Mock OAuth flow - in production, this would open OAuth window
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      setGoogleConnected(true);
+      toast.success('Google Calendar conectado exitosamente');
+    } catch (error) {
+      toast.error('Error al conectar con Google Calendar');
+    } finally {
+      setIsConnecting(null);
+    }
+  };
+
+  const handleDisconnectGoogle = () => {
+    setGoogleConnected(false);
+    toast.success('Google Calendar desconectado');
+  };
+
+  const handleConnectOutlook = async () => {
+    setIsConnecting('outlook');
+    try {
+      // Mock OAuth flow - in production, this would open OAuth window
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      setOutlookConnected(true);
+      toast.success('Outlook Calendar conectado exitosamente');
+    } catch (error) {
+      toast.error('Error al conectar con Outlook Calendar');
+    } finally {
+      setIsConnecting(null);
+    }
+  };
+
+  const handleDisconnectOutlook = () => {
+    setOutlookConnected(false);
+    toast.success('Outlook Calendar desconectado');
   };
 
   return (
@@ -167,6 +211,111 @@ export function Settings({ user, onUpdateUser, onRefreshUser }: SettingsProps) {
                 </Button>
               </div>
             </form>
+          </CardContent>
+        </Card>
+
+        {/* Calendar Integrations */}
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Integraciones de calendario
+            </CardTitle>
+            <CardDescription>
+              Conecta tus calendarios para sincronizar automáticamente tus citas
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Google Calendar */}
+            <div className="flex items-center justify-between rounded-lg border p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500">
+                  <Calendar className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">Google Calendar</p>
+                    {googleConnected && (
+                      <CheckCircle2 className="h-4 w-4 text-success" />
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {googleConnected
+                      ? 'Conectado y sincronizando'
+                      : 'Sincroniza tus citas con Google Calendar'}
+                  </p>
+                </div>
+              </div>
+              {googleConnected ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDisconnectGoogle}
+                  disabled={isConnecting !== null}
+                >
+                  Desconectar
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={handleConnectGoogle}
+                  disabled={isConnecting !== null}
+                  className="gap-2"
+                >
+                  <Link2 className="h-4 w-4" />
+                  {isConnecting === 'google' ? 'Conectando...' : 'Conectar'}
+                </Button>
+              )}
+            </div>
+
+            {/* Outlook Calendar */}
+            <div className="flex items-center justify-between rounded-lg border p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0078D4]">
+                  <Calendar className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">Outlook Calendar</p>
+                    {outlookConnected && (
+                      <CheckCircle2 className="h-4 w-4 text-success" />
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {outlookConnected
+                      ? 'Conectado y sincronizando'
+                      : 'Sincroniza tus citas con Outlook Calendar'}
+                  </p>
+                </div>
+              </div>
+              {outlookConnected ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDisconnectOutlook}
+                  disabled={isConnecting !== null}
+                >
+                  Desconectar
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={handleConnectOutlook}
+                  disabled={isConnecting !== null}
+                  className="gap-2"
+                >
+                  <Link2 className="h-4 w-4" />
+                  {isConnecting === 'outlook' ? 'Conectando...' : 'Conectar'}
+                </Button>
+              )}
+            </div>
+
+            <Alert>
+              <AlertDescription className="text-sm">
+                Las citas creadas en esta aplicación se sincronizarán automáticamente con los
+                calendarios conectados.
+              </AlertDescription>
+            </Alert>
           </CardContent>
         </Card>
 

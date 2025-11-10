@@ -114,6 +114,7 @@ Puede exportarlas en PowerShell (solo afectan a la sesión actual):
 ```powershell
 $env:BACKENDLESS_APP_ID = "E60A01B9-D08F-4932-915E-F479323571A3"
 $env:BACKENDLESS_REST_API_KEY = "222DE0E2-363D-468A-A5B3-0556E6A62310"
+$env:GEMINI_API_KEY = 'AIzaSyAEN0UKlfsesw2GWkkhASxy4G2dvDE2AoU'
 ```
 
 Si no las define, `app.py` usa valores de fallback escritos en el archivo (útiles para pruebas locales).

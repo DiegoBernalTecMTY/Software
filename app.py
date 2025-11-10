@@ -113,8 +113,8 @@ def users_login():
                 backendless_id = body.get('objectId')
                 # Query for existing profile by backendlessUserId
                 q = f"backendlessUserId = '{backendless_id}'"
-                query_url = f"{BACKENDLESS_USUARIOS_TABLE}?where={q}"
-                r = requests.get(query_url, headers=HEADERS, timeout=10)
+                # Use params so requests encodes the where clause correctly
+                r = requests.get(BACKENDLESS_USUARIOS_TABLE, headers=HEADERS, params={'where': q}, timeout=10)
                 if r.ok:
                     found = r.json()
                     if found:
@@ -211,9 +211,9 @@ def get_usuario_by_id(id):
     Necesitamos hacer una consulta para encontrar el usuario con el 'id' proporcionado.
     """
     where_clause = f"id = {id}"
-    query_url = f"{BACKENDLESS_USUARIOS_TABLE}?where={where_clause}"
     try:
-        response = requests.get(query_url, headers=HEADERS)
+        # Use params to ensure proper encoding of the where clause
+        response = requests.get(BACKENDLESS_USUARIOS_TABLE, headers=HEADERS, params={'where': where_clause})
         response.raise_for_status()
         usuarios = response.json()
         if usuarios:
@@ -237,10 +237,9 @@ def update_usuario(id):
     """
     data = request.json
     where_clause = f"id = {id}"
-    query_url = f"{BACKENDLESS_USUARIOS_TABLE}?where={where_clause}"
     try:
         # 1. Encontrar el objectId del usuario por su 'id' de tabla
-        response_find = requests.get(query_url, headers=HEADERS)
+        response_find = requests.get(BACKENDLESS_USUARIOS_TABLE, headers=HEADERS, params={'where': where_clause})
         response_find.raise_for_status()
         usuarios = response_find.json()
 
@@ -265,10 +264,9 @@ def delete_usuario(id):
     Primero buscamos el usuario por el 'id' de la tabla, luego eliminamos usando el 'objectId'.
     """
     where_clause = f"id = {id}"
-    query_url = f"{BACKENDLESS_USUARIOS_TABLE}?where={where_clause}"
     try:
         # 1. Encontrar el objectId del usuario por su 'id' de tabla
-        response_find = requests.get(query_url, headers=HEADERS)
+        response_find = requests.get(BACKENDLESS_USUARIOS_TABLE, headers=HEADERS, params={'where': where_clause})
         response_find.raise_for_status()
         usuarios = response_find.json()
 
@@ -310,8 +308,9 @@ def create_cita():
 def list_citas():
     where = request.args.get('where')
     try:
-        url = f"{BACKENDLESS_CITA_TABLE}{'?where=' + where if where else ''}"
-        response = requests.get(url, headers=HEADERS)
+        # Use params so requests handles encoding of the where clause correctly
+        params = {'where': where} if where else None
+        response = requests.get(BACKENDLESS_CITA_TABLE, headers=HEADERS, params=params)
         response.raise_for_status()
         return jsonify(response.json()), response.status_code
     except requests.exceptions.RequestException as e:
