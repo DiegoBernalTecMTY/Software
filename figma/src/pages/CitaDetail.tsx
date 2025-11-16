@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, Calendar, Clock, MapPin, Edit, Trash2, Share2 } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, MapPin, Edit, Trash2, Share2, Bell } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { CitaForm } from '../components/CitaForm';
@@ -84,11 +84,12 @@ export function CitaDetail({
         {/* Back button */}
         <Button
           variant="ghost"
+          size="sm"
           onClick={onBack}
-          className="mb-6"
+          className="mb-2"
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
-          Volver
+          Volver al inicio
         </Button>
 
         {/* Main card */}

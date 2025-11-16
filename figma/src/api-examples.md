@@ -102,6 +102,79 @@ user-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 }
 ```
 
+### Update AI Agent Instructions
+
+Users can teach the AI agent their personal scheduling preferences and rules for more intelligent suggestions.
+
+**Request:**
+```http
+PUT /users/3F2504E0-4F89-11D3-9A0C-0305E82C3301
+Content-Type: application/json
+user-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+{
+  "instrucciones_agente": "• Siempre prefiero las citas por la mañana, entre 9am y 12pm\n• Los lunes tengo reunión de equipo a las 10am, no agendar nada a esa hora\n• Necesito 15 minutos de buffer entre citas consecutivas\n• Las citas médicas deben ser en el Hospital Central\n• Recordatorios: 1 hora antes para citas médicas, 30 min para las demás\n• No agendar citas los viernes por la tarde\n• Reuniones de trabajo preferiblemente en la oficina del centro"
+}
+```
+
+**Response:**
+```json
+{
+  "objectId": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+  "email": "maria.garcia.lopez@example.com",
+  "nombre": "María García López",
+  "instrucciones_agente": "• Siempre prefiero las citas por la mañana, entre 9am y 12pm\n• Los lunes tengo reunión de equipo a las 10am, no agendar nada a esa hora\n• Necesito 15 minutos de buffer entre citas consecutivas\n• Las citas médicas deben ser en el Hospital Central\n• Recordatorios: 1 hora antes para citas médicas, 30 min para las demás\n• No agendar citas los viernes por la tarde\n• Reuniones de trabajo preferiblemente en la oficina del centro",
+  "updated": "2025-11-09T15:45:00.000Z"
+}
+```
+
+**Usage in Natural Language Commands:**
+
+When the AI agent receives a natural language command to create an appointment, it should:
+1. Retrieve the user's `instrucciones_agente` from their profile
+2. Include these instructions as context when processing the command
+3. Apply the rules and preferences when making suggestions or creating appointments
+
+Example: If a user says "Agendar cita médica mañana", the agent should:
+- Suggest a time between 9am-12pm (user's preferred morning hours)
+- Recommend Hospital Central as the location (user's medical appointment preference)
+- Set the reminder for 1 hour before (user's medical appointment default)
+
+### Change Password
+
+**Request:**
+```http
+PUT /users/3F2504E0-4F89-11D3-9A0C-0305E82C3301/password
+Content-Type: application/json
+user-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+{
+  "currentPassword": "OldSecurePass123",
+  "newPassword": "NewSecurePass456"
+}
+```
+
+**Response (Success):**
+```json
+{
+  "message": "Password updated successfully"
+}
+```
+
+**Response (Error - Wrong current password):**
+```json
+{
+  "code": 401,
+  "message": "Current password is incorrect"
+}
+```
+
+**Password Requirements:**
+- Minimum 8 characters
+- Must include uppercase letters
+- Must include lowercase letters
+- Must include numbers
+
 ---
 
 ## Appointments (Citas)
@@ -358,6 +431,109 @@ user-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
   }
 }
 ```
+
+### Example 4: Using AI Agent Instructions (Personalized)
+
+**Context:** User has the following `instrucciones_agente`:
+```
+• Siempre prefiero las citas por la mañana, entre 9am y 12pm
+• Las citas médicas deben ser en el Hospital Central
+• Recordatorios: 1 hora antes para citas médicas
+```
+
+**Request:**
+```http
+POST /data/Comando
+Content-Type: application/json
+user-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+{
+  "texto": "Agendar cita médica para mañana"
+}
+```
+
+**Response (AI applies user preferences):**
+```json
+{
+  "exito": true,
+  "respuesta": "He agendado tu cita médica para mañana a las 10:00 en el Hospital Central, según tus preferencias de horario matutino. He configurado un recordatorio para 1 hora antes.",
+  "resultado": {
+    "titulo": "Cita médica",
+    "fecha": "2025-11-10",
+    "hora_inicio": "10:00",
+    "lugar": "Hospital Central",
+    "descripcion": "",
+    "notificacion": {
+      "activa": true,
+      "mensaje": "",
+      "tiempo_anticipacion": 60
+    }
+  }
+}
+```
+
+**Note:** The AI agent should:
+1. Retrieve the user's `instrucciones_agente` from their profile
+2. Parse and apply relevant rules:
+   - Morning preference (9am-12pm) → Suggested 10:00
+   - Medical appointments at Hospital Central → Set as location
+   - 1 hour reminder for medical appointments → Set notification
+3. Provide a natural language confirmation that acknowledges the applied preferences
+
+### Example 5: Voice Input to AI Agent (Future Integration)
+
+**Context:** User speaks a command using the microphone button in CommandComposer.
+
+The frontend captures the audio and converts it to text using Web Speech API. For full AI agent integration, implement this endpoint:
+
+**Request:**
+```http
+POST /api/ai-agent/voice
+Content-Type: application/json
+user-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+{
+  "transcript": "Quiero agendar una cita con mi dentista para el próximo martes como a las cuatro de la tarde",
+  "userId": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+  "context": {
+    "instrucciones_agente": "• Siempre prefiero las citas por la mañana, entre 9am y 12pm\n• Las citas con dentista son en Clínica Dental Centro",
+    "recent_appointments": [...],
+    "current_date": "2025-11-16"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "exito": true,
+  "respuesta": "Entiendo que quieres agendar con tu dentista el martes. Aunque mencionaste las 4 de la tarde, según tus preferencias normalmente prefieres citas por la mañana. ¿Te gustaría agendar a las 10:00 AM en la Clínica Dental Centro?",
+  "resultado": {
+    "titulo": "Cita con dentista",
+    "fecha": "2025-11-19",
+    "hora_inicio": "10:00",
+    "lugar": "Clínica Dental Centro",
+    "descripcion": "",
+    "notificacion": {
+      "activa": true,
+      "mensaje": "",
+      "tiempo_anticipacion": 30
+    }
+  },
+  "metadata": {
+    "confidence": 0.85,
+    "applied_rules": ["location_preference", "morning_preference_suggestion"],
+    "alternative_suggestions": [
+      {
+        "hora_inicio": "16:00",
+        "description": "Hora solicitada originalmente"
+      }
+    ]
+  }
+}
+```
+
+**For detailed voice integration documentation, see [VOICE-AI-INTEGRATION.md](./VOICE-AI-INTEGRATION.md)**
 
 ---
 

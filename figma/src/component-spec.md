@@ -219,21 +219,32 @@ interface CommandComposerProps {
    - Multi-line textarea
    - Keyboard shortcut (Cmd/Ctrl + Enter to submit)
    - Character count/guidance
+   - Voice input button (microphone icon)
 
-2. **Suggested Commands:**
+2. **Voice Input (NEW):**
+   - Speech-to-text using Web Speech API
+   - Visual indicator when listening (pulsing red button)
+   - Real-time transcription to textarea
+   - Support for Spanish (es-ES)
+   - Browser compatibility: Chrome, Edge, Safari (limited)
+   - Error handling for permissions and unsupported browsers
+   - See [VOICE-AI-INTEGRATION.md](./VOICE-AI-INTEGRATION.md) for AI agent integration
+
+3. **Suggested Commands:**
    - Pre-written example commands
    - Click to populate input
    - Contextual to common actions
 
-3. **Result Preview:**
+4. **Result Preview:**
    - Shows interpreted command
    - Preview of created cita
    - Confirm/Cancel actions
 
-4. **Error Handling:**
+5. **Error Handling:**
    - Clear error messages
    - Retry button
    - Suggestions for correction
+   - Voice-specific errors (no microphone, permission denied, etc.)
 
 ### Usage Flow
 
@@ -251,8 +262,9 @@ interface CommandComposerProps {
 
 ### States
 
-- **Idle:** Empty input with suggestions
-- **Processing:** Disabled input, loading indicator
+- **Idle:** Empty input with suggestions, microphone button available
+- **Listening:** Voice input active, pulsing red microphone button, textarea disabled
+- **Processing:** Disabled input, loading indicator with spinner
 - **Preview:** Shows interpretation with confirm button
 - **Error:** Red alert with error message
 
@@ -262,6 +274,9 @@ interface CommandComposerProps {
 - Keyboard shortcuts documented in UI
 - Focus management through flow
 - Error announcements
+- Voice button has title attribute for tooltip
+- Visual feedback for listening state (animation + text)
+- Clear microphone permission requests
 
 ---
 

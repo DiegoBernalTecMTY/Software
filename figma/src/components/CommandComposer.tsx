@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { Send, Sparkles, Calendar, Edit, Trash2 } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Send, Sparkles, Calendar, Mic, MicOff, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Alert, AlertDescription } from './ui/alert';
+import { toast } from 'sonner@2.0.3';
 import type { CommandResponse, Cita } from '../utils/api';
 
 interface CommandComposerProps {
@@ -17,6 +18,11 @@ export function CommandComposer({ onProcess, onConfirm }: CommandComposerProps) 
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState<CommandResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Voice input states
+  const [isListening, setIsListening] = useState(false);
+  const [isVoiceSupported, setIsVoiceSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   const suggestedCommands = [
     'Agendar cita con el dentista el martes a las 4pm',
@@ -24,6 +30,107 @@ export function CommandComposer({ onProcess, onConfirm }: CommandComposerProps) 
     'Crear reunión con el equipo mañana a las 10am',
     'Recordatorio: cita médica viernes',
   ];
+
+  // Initialize Speech Recognition
+  useEffect(() => {
+    // Check if browser supports Speech Recognition
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (SpeechRecognition) {
+      setIsVoiceSupported(true);
+      
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'es-ES'; // Spanish language
+      recognition.continuous = false; // Stop after one result
+      recognition.interimResults = true; // Show interim results
+      recognition.maxAlternatives = 1;
+      
+      recognition.onstart = () => {
+        setIsListening(true);
+        toast.info('Escuchando... Habla ahora');
+      };
+      
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setCommand(transcript);
+        
+        // If it's the final result, we can optionally auto-process
+        if (event.results[0].isFinal) {
+          // ==========================================
+          // TODO: AI AGENT INTEGRATION POINT
+          // ==========================================
+          // When ready to connect to a real AI agent:
+          // 1. Create an endpoint in /utils/api.ts:
+          //    - voiceToAIAgent: async (audioTranscript: string) => Promise<CommandResponse>
+          //    - This should send the transcript to your AI agent backend
+          // 2. The AI agent should:
+          //    - Process the natural language command
+          //    - Return structured appointment data
+          //    - Include contextual information from user's instrucciones_agente
+          // 3. Replace the toast below with:
+          //    - await onProcess(transcript); // This will call the existing command processor
+          //    - Or create a separate handler for voice-specific processing
+          // 4. Consider adding:
+          //    - Loading state while AI processes
+          //    - Streaming responses for real-time feedback
+          //    - Voice output (text-to-speech) for AI responses
+          //    - Conversation history for context-aware interactions
+          // ==========================================
+          
+          toast.success('Comando capturado: ' + transcript);
+        }
+      };
+      
+      recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+        
+        let errorMessage = 'Error al capturar voz';
+        let errorDescription = '';
+        
+        switch (event.error) {
+          case 'not-allowed':
+            errorMessage = '🔒 Permiso de micrófono denegado';
+            errorDescription = 'Haz clic en el ícono de candado o configuración en la barra de direcciones y permite el acceso al micrófono. Luego recarga la página.';
+            break;
+          case 'no-speech':
+            errorMessage = 'No se detectó voz';
+            errorDescription = 'Intenta hablar más cerca del micrófono o en un lugar más silencioso.';
+            break;
+          case 'audio-capture':
+            errorMessage = 'No se detectó micrófono';
+            errorDescription = 'Verifica que tu micrófono esté conectado y configurado correctamente en tu sistema.';
+            break;
+          case 'network':
+            errorMessage = 'Error de red';
+            errorDescription = 'La función de voz requiere conexión a internet. Verifica tu conexión.';
+            break;
+          default:
+            errorDescription = 'Por favor, intenta de nuevo.';
+        }
+        
+        toast.error(errorMessage, {
+          description: errorDescription,
+          duration: 6000,
+        });
+      };
+      
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+      
+      recognitionRef.current = recognition;
+    } else {
+      setIsVoiceSupported(false);
+      console.warn('Speech Recognition not supported in this browser');
+    }
+    
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleProcess = async () => {
     if (!command.trim()) return;
@@ -57,6 +164,30 @@ export function CommandComposer({ onProcess, onConfirm }: CommandComposerProps) 
     }
   };
 
+  const handleVoiceInput = () => {
+    if (!isVoiceSupported) {
+      toast.error('Tu navegador no soporta entrada por voz. Prueba con Chrome o Edge.');
+      return;
+    }
+    
+    if (isListening) {
+      // Stop listening
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    } else {
+      // Start listening
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch (error) {
+          console.error('Error starting speech recognition:', error);
+          toast.error('Error al iniciar el reconocimiento de voz');
+        }
+      }
+    }
+  };
+
   return (
     <Card className="w-full">
       <CardHeader>
@@ -72,26 +203,58 @@ export function CommandComposer({ onProcess, onConfirm }: CommandComposerProps) 
       <CardContent className="space-y-4">
         {/* Command input */}
         <div className="space-y-2">
-          <Textarea
-            placeholder="Escribe tu comando aquí..."
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={3}
-            disabled={isProcessing}
-            className="resize-none"
-          />
+          <div className="relative">
+            <Textarea
+              placeholder="Escribe o dicta tu comando aquí..."
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={3}
+              disabled={isProcessing || isListening}
+              className="resize-none pr-12"
+            />
+            {/* Voice input button */}
+            <Button
+              type="button"
+              size="icon"
+              variant={isListening ? "default" : "ghost"}
+              className={`absolute bottom-2 right-2 h-8 w-8 ${
+                isListening ? 'animate-pulse bg-destructive hover:bg-destructive/90' : ''
+              }`}
+              onClick={handleVoiceInput}
+              disabled={isProcessing || !isVoiceSupported}
+              title={isListening ? 'Detener grabación' : 'Dictar por voz'}
+            >
+              {isListening ? (
+                <MicOff className="h-4 w-4" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
-              Presiona Cmd/Ctrl + Enter para enviar
+              {isListening 
+                ? '🎤 Escuchando... Habla ahora' 
+                : 'Presiona Cmd/Ctrl + Enter para enviar o usa el micrófono'
+              }
             </span>
             <Button
               onClick={handleProcess}
-              disabled={!command.trim() || isProcessing}
+              disabled={!command.trim() || isProcessing || isListening}
               size="sm"
             >
-              <Send className="mr-2 h-4 w-4" />
-              {isProcessing ? 'Procesando...' : 'Procesar'}
+              {isProcessing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Procesando...
+                </>
+              ) : (
+                <>
+                  <Send className="mr-2 h-4 w-4" />
+                  Procesar
+                </>
+              )}
             </Button>
           </div>
         </div>

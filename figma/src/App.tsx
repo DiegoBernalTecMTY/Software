@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import { Toaster, toast } from 'sonner@2.0.3';
+import { ThemeProvider } from './utils/theme';
 import { Header } from './components/Header';
 import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
+import { AppDashboard } from './pages/AppDashboard';
 import { CitasList } from './pages/CitasList';
 import { CitaDetail } from './pages/CitaDetail';
 import { Settings } from './pages/Settings';
 import api, { getUserData, type Usuario, type Cita } from './utils/api';
 
-type Page = 'landing' | 'login' | 'register' | 'dashboard' | 'citas' | 'cita-detail' | 'settings';
+type Page = 'landing' | 'login' | 'register' | 'dashboard' | 'app-dashboard' | 'citas' | 'cita-detail' | 'settings';
 
 interface PageState {
   current: Page;
@@ -152,6 +154,16 @@ export default function App() {
         return (
           <Dashboard
             citas={citas}
+            onProcessCommand={handleProcessCommand}
+            onNavigate={handleNavigate}
+            userName={currentUser.nombre}
+          />
+        );
+
+      case 'app-dashboard':
+        return (
+          <AppDashboard
+            citas={citas}
             isLoading={isLoadingCitas}
             onCreateCita={handleCreateCita}
             onUpdateCita={handleUpdateCita}
@@ -193,6 +205,7 @@ export default function App() {
             user={currentUser}
             onUpdateUser={handleUpdateUser}
             onRefreshUser={refreshUser}
+            onNavigate={handleNavigate}
           />
         );
 
@@ -200,25 +213,23 @@ export default function App() {
         return (
           <Dashboard
             citas={citas}
-            isLoading={isLoadingCitas}
-            onCreateCita={handleCreateCita}
-            onUpdateCita={handleUpdateCita}
-            onDeleteCita={handleDeleteCita}
             onProcessCommand={handleProcessCommand}
-            onRefresh={loadCitas}
             onNavigate={handleNavigate}
+            userName={currentUser.nombre}
           />
         );
     }
   };
 
   return (
-    <div className="min-h-screen">
-      {currentUser && (
-        <Header user={currentUser} onNavigate={handleNavigate} onLogout={handleLogout} />
-      )}
-      {renderPage()}
-      <Toaster position="top-right" richColors closeButton />
-    </div>
+    <ThemeProvider>
+      <div className="min-h-screen">
+        {currentUser && (
+          <Header user={currentUser} onNavigate={handleNavigate} onLogout={handleLogout} />
+        )}
+        {renderPage()}
+        <Toaster position="top-right" richColors closeButton />
+      </div>
+    </ThemeProvider>
   );
 }

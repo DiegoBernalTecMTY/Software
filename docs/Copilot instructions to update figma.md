@@ -7,7 +7,7 @@ Keep this file updated with any new problems found during future syncs.
 ---
 
 ## Goals when syncing
-- Replace `frontend/src` and supporting top-level files (`index.html`, `package.json`, `vite.config.ts`) with the latest from `figma/src`.
+- Replace `frontend/src` and supporting top-level files (`index.html`, `package.json`, `vite.config.ts`) with the latest from `figma/src`. There is no need to backup front end as user already has a backup of the current verson in github.
 - Ensure the dev server builds and the app talks to the backend proxy defined in `app.py` and `api.yaml`.
 - Avoid regressions: date parsing/formatting, user-scoped data leakage, broken TypeScript imports, and malformed proxied queries.
 

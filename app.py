@@ -9,12 +9,24 @@ import requests
 import os
 import json
 import re
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 
 # AI helper (Gemini / LangChain scaffold)
 try:
     from ai import process_command as ai_process_command
 except Exception:
     ai_process_command = None
+
+# New agent abstraction (LangChain / Groq)
+try:
+    from ai_agent import run_text_agent, run_voice_agent, create_plan_events
+except Exception:
+    run_text_agent = None
+    run_voice_agent = None
+    create_plan_events = None
 
 app = Flask(__name__)
 
@@ -485,3 +497,112 @@ def process_comando():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+
+def _make_groq_client():
+    """Return an OpenAI-compatible client configured for Groq if available."""
+    if OpenAI is None:
+        return None
+    groq_key = os.environ.get('GROQ_API_KEY')
+    groq_base = os.environ.get('GROQ_BASE_URL', 'https://api.groq.com/openai/v1')
+    return OpenAI(api_key=groq_key, base_url=groq_base)
+
+
+@app.route('/api/ai/text', methods=['POST'])
+def api_ai_text():
+    """Process a text instruction via the new ai_agent abstraction."""
+    data = request.json or {}
+    text = data.get('text') or data.get('texto')
+    user_ctx = data.get('context') or {}
+    if run_text_agent is None:
+        return jsonify({'error': 'AI agent not available'}), 500
+    try:
+        parsed = run_text_agent(text, user_ctx)
+        return jsonify(parsed), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ai/voice', methods=['POST'])
+def api_ai_voice():
+    """Accepts either JSON {transcript:...} or multipart form with `audio` file.
+    If audio file provided, attempts transcription using Groq via OpenAI client.
+    """
+    # If transcript provided directly
+    if request.is_json:
+        data = request.json
+        transcript = data.get('transcript') or data.get('texto')
+        user_ctx = data.get('context') or {}
+        if run_voice_agent is None:
+            return jsonify({'error': 'AI agent not available'}), 500
+        return jsonify(run_voice_agent(transcript, user_ctx)), 200
+
+    # Else, handle multipart audio upload
+    if 'audio' not in request.files:
+        return jsonify({'error': 'No transcript or audio file provided'}), 400
+    audio = request.files['audio']
+    client = _make_groq_client()
+    if client is None:
+        return jsonify({'error': 'OpenAI/Groq client not available'}), 500
+    try:
+        # Try client helper if available
+        if hasattr(client, 'audio') and hasattr(client.audio, 'transcriptions'):
+            resp = client.audio.transcriptions.create(file=audio, model='whisper-large-v3-turbo')
+            transcript = getattr(resp, 'text', None) or getattr(resp, 'transcript', None) or str(resp)
+        else:
+            # Fallback: call Groq OpenAI-compatible REST endpoint directly
+            groq_base = os.environ.get('GROQ_BASE_URL', 'https://api.groq.com/openai/v1')
+            groq_key = os.environ.get('GROQ_API_KEY')
+            url = groq_base.rstrip('/') + '/audio/transcriptions'
+            files = {'file': (audio.filename, audio.stream, audio.mimetype)}
+            headers = {'Authorization': f'Bearer {groq_key}'}
+            r = requests.post(url, files=files, headers=headers, timeout=60)
+            r.raise_for_status()
+            data = r.json()
+            # Attempt common fields
+            transcript = data.get('text') or data.get('transcript') or json.dumps(data, ensure_ascii=False)
+    except Exception as e:
+        return jsonify({'error': 'Transcription failed: ' + str(e)}), 500
+
+    # Delegate to voice agent
+    if run_voice_agent is None:
+        return jsonify({'error': 'AI agent not available after transcription', 'transcript': transcript}), 500
+    return jsonify(run_voice_agent(transcript, {})), 200
+
+
+@app.route('/api/ai/plan', methods=['POST'])
+def api_ai_plan():
+    data = request.json or {}
+    goal = data.get('goal')
+    window = data.get('window')
+    prefs = data.get('preferences')
+    if create_plan_events is None:
+        return jsonify({'error': 'Plan generator not available'}), 500
+    try:
+        events = create_plan_events(goal, window, prefs)
+        return jsonify({'plan': events}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# --- OAuth / Integrations stubs (Google / Outlook) ---
+@app.route('/integrations/google/start', methods=['GET'])
+def integrations_google_start():
+    # Redirect the user to Google OAuth consent screen (server should implement)
+    return jsonify({'message': 'TODO: implement Google OAuth start endpoint'}), 501
+
+
+@app.route('/integrations/google/callback', methods=['GET'])
+def integrations_google_callback():
+    # Exchange code for tokens and persist them securely (TODO)
+    return jsonify({'message': 'TODO: implement Google OAuth callback endpoint'}), 501
+
+
+@app.route('/integrations/outlook/start', methods=['GET'])
+def integrations_outlook_start():
+    return jsonify({'message': 'TODO: implement Outlook OAuth start endpoint'}), 501
+
+
+@app.route('/integrations/outlook/callback', methods=['GET'])
+def integrations_outlook_callback():
+    return jsonify({'message': 'TODO: implement Outlook OAuth callback endpoint'}), 501

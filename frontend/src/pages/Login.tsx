@@ -99,7 +99,7 @@ export function Login({ onLogin, onNavigateToRegister, onNavigateBack }: LoginPr
                   id="password"
                   name="password"
                   type="password"
-                  placeholder="••••••••"
+                  placeholder=""
                   value={formData.password}
                   onChange={handleChange}
                   disabled={isSubmitting}

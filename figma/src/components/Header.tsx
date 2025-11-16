@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Calendar, LogOut, Settings, User } from 'lucide-react';
+import { Calendar, LogOut, Settings, User, Moon, Sun } from 'lucide-react';
 import { Avatar, AvatarFallback } from './ui/avatar';
 import { Button } from './ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Separator } from './ui/separator';
+import { useTheme } from '../utils/theme';
 import type { Usuario } from '../utils/api';
 
 interface HeaderProps {
@@ -14,6 +15,7 @@ interface HeaderProps {
 
 export function Header({ user, onNavigate, onLogout }: HeaderProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
 
   const getInitials = (name: string) => {
     return name
@@ -35,26 +37,41 @@ export function Header({ user, onNavigate, onLogout }: HeaderProps) {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-card shadow-sm">
+    <header className="sticky top-0 z-50 w-full border-b border-primary/20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-lg shadow-lg">
       <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-4 md:px-6">
         {/* Logo and App Name */}
         <button
           onClick={() => onNavigate('dashboard')}
-          className="flex items-center gap-2 transition-opacity hover:opacity-80"
+          className="flex items-center gap-2.5 transition-all hover:scale-105 group"
           aria-label="Ir al inicio"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-            <Calendar className="h-5 w-5 text-primary-foreground" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl gradient-primary shadow-md group-hover:shadow-glow-primary transition-all">
+            <Calendar className="h-5 w-5 text-white" />
           </div>
           <div className="flex flex-col">
-            <span className="font-semibold text-foreground">Agente de Citas</span>
-            <span className="text-xs text-muted-foreground">Inteligente y personal</span>
+            <span className="font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Agente de Citas</span>
+            <span className="text-xs font-medium text-muted-foreground dark:text-slate-400">Inteligente y personal</span>
           </div>
         </button>
 
         {/* Right side - User menu */}
         {user && (
           <div className="flex items-center gap-3">
+            {/* Theme toggle button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              className="relative h-9 w-9 rounded-lg hover:scale-110 transition-all hover:bg-primary/10"
+              aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="h-5 w-5 text-primary" />
+              ) : (
+                <Moon className="h-5 w-5 text-primary" />
+              )}
+            </Button>
+
             {/* User info - hidden on mobile */}
             <div className="hidden flex-col items-end md:flex">
               <span className="text-sm font-medium text-foreground">{user.nombre}</span>
@@ -66,11 +83,11 @@ export function Header({ user, onNavigate, onLogout }: HeaderProps) {
               <PopoverTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="relative h-10 w-10 rounded-full"
+                  className="relative h-10 w-10 rounded-full hover:scale-110 transition-all"
                   aria-label="Menú de usuario"
                 >
-                  <Avatar className="h-10 w-10 border-2 border-primary/20">
-                    <AvatarFallback className="bg-primary text-primary-foreground">
+                  <Avatar className="h-10 w-10 border-2 border-primary/30 shadow-md hover:shadow-glow-primary transition-all">
+                    <AvatarFallback className="gradient-secondary text-white font-semibold">
                       {getInitials(user.nombre)}
                     </AvatarFallback>
                   </Avatar>

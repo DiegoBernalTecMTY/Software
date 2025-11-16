@@ -117,7 +117,37 @@ The application uses a calm, professional teal/blue accent color scheme optimize
     └── globals.css             # Design tokens + base styles
 ```
 
+## 🎤 Voice Input Integration
+
+The application includes voice-to-text functionality for natural language commands. See [VOICE-AI-INTEGRATION.md](./VOICE-AI-INTEGRATION.md) for detailed documentation on:
+
+- Current implementation using Web Speech API
+- How to connect to a real AI agent backend
+- Recommended AI models and services
+- Code examples and integration points
+- Best practices for voice interactions
+
+**Current Status:** Frontend implementation complete. Voice transcription works in supported browsers. Backend AI agent integration is ready to be implemented following the documentation.
+
 ## 🔌 API Integration
+
+### Demo Mode (Default)
+
+The application includes a complete mock data layer for development and demonstration. By default, `USE_MOCK_DATA = true` in `/utils/api.ts`.
+
+**Mock Data Includes:**
+- Sample appointments (3 pre-populated citas)
+- Demo user account
+- Simulated API delays (300ms)
+- Full CRUD operations in memory
+- Natural language command parsing
+
+**To Use Demo Mode:**
+- Simply launch the application
+- Log in with any credentials
+- All features work without a backend
+
+### Connecting to Real API
 
 ### Base Configuration
 
@@ -153,7 +183,12 @@ Headers: { "user-token": "<token>" }
 // 4. Update user
 PUT /users/{id}
 Headers: { "user-token": "<token>" }
-Body: { nombre?, email? }
+Body: { nombre?, email?, instrucciones_agente? }
+
+// 5. Change password
+PUT /users/{id}/password
+Headers: { "user-token": "<token>" }
+Body: { currentPassword: string, newPassword: string }
 ```
 
 ### Citas (Appointments) Endpoints
@@ -191,10 +226,35 @@ DELETE /data/Cita/{id}
 POST /data/Comando
 Body: { texto: string }
 Response: {
-  mensaje: string,        // Human-readable interpretation
-  resultado?: Cita        // Parsed cita data
+  exito: boolean,
+  respuesta: string,       // Human-readable interpretation
+  mensaje?: string,        // Legacy field
+  resultado?: Cita         // Parsed cita data with applied preferences
 }
 ```
+
+**AI Agent Personalization:**
+
+When processing commands, the backend should:
+1. Retrieve the user's `instrucciones_agente` from their profile
+2. Include these instructions as context to the AI/NLP system
+3. Apply user preferences when creating or suggesting appointments
+
+Example user instructions:
+```
+• Siempre prefiero las citas por la mañana, entre 9am y 12pm
+• Los lunes tengo reunión de equipo a las 10am, no agendar nada a esa hora
+• Necesito 15 minutos de buffer entre citas consecutivas
+• Las citas médicas deben ser en el Hospital Central
+• Recordatorios: 1 hora antes para citas médicas, 30 min para las demás
+```
+
+The AI should apply these rules intelligently:
+- Suggest morning times when creating appointments
+- Avoid Monday 10am slots
+- Check for scheduling conflicts and buffer time
+- Auto-set location for medical appointments
+- Configure appropriate notification times
 
 ### Type Definitions
 
@@ -203,6 +263,7 @@ interface Usuario {
   objectId?: string;
   email: string;
   nombre: string;
+  instrucciones_agente?: string;  // AI agent personalization rules
   created?: string;
   updated?: string;
 }
@@ -214,6 +275,11 @@ interface Cita {
   hora_inicio: string;   // HH:MM
   lugar: string;
   descripcion?: string;
+  notificacion?: {       // Optional notification/reminder
+    activa: boolean;
+    mensaje?: string;
+    tiempo_anticipacion?: number;  // minutes before appointment
+  };
   owner?: string;
   created?: string;
   updated?: string;

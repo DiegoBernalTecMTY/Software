@@ -46,19 +46,19 @@ export function CitaCard({ cita, onEdit, onDelete, onClick, variant = 'default' 
     return (
       <div
         onClick={() => onClick?.(cita)}
-        className="group flex cursor-pointer items-start gap-3 rounded-lg border bg-card p-3 transition-all hover:border-primary/40 hover:shadow-md"
+        className="group flex cursor-pointer items-start gap-3 rounded-xl border border-primary/20 dark:border-primary/30 bg-white dark:bg-slate-800 p-3 shadow-sm transition-all hover:border-primary hover:shadow-lg hover:scale-[1.02]"
       >
-        <div className="flex flex-col items-center rounded-md bg-primary/10 px-2 py-1">
-          <span className="text-xs text-primary">
+        <div className="flex flex-col items-center rounded-lg gradient-primary px-2.5 py-1.5 shadow-md shadow-glow-primary">
+          <span className="text-xs font-medium text-white/90">
             {new Date(cita.fecha + 'T00:00:00').toLocaleDateString('es-ES', { month: 'short' })}
           </span>
-          <span className="font-semibold text-primary">
+          <span className="font-bold text-white text-lg leading-tight">
             {new Date(cita.fecha + 'T00:00:00').getDate()}
           </span>
         </div>
         <div className="flex-1">
-          <h4 className="font-medium text-foreground group-hover:text-primary">{cita.titulo}</h4>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <h4 className="font-semibold text-foreground dark:text-cyan-50 group-hover:text-primary dark:group-hover:text-cyan-300 transition-all">{cita.titulo}</h4>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground dark:text-slate-300">
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
               {cita.hora_inicio}
@@ -72,7 +72,7 @@ export function CitaCard({ cita, onEdit, onDelete, onClick, variant = 'default' 
           </div>
         </div>
         {(upcoming || past) && (
-          <Badge variant={upcoming ? 'default' : 'secondary'} className="text-xs">
+          <Badge variant={upcoming ? 'default' : 'secondary'} className={`text-xs font-medium ${upcoming ? 'gradient-success text-white' : 'dark:bg-slate-700 dark:text-slate-300'}`}>
             {upcoming ? 'Próxima' : 'Pasada'}
           </Badge>
         )}
@@ -81,22 +81,26 @@ export function CitaCard({ cita, onEdit, onDelete, onClick, variant = 'default' 
   }
 
   return (
-    <Card className="group transition-all hover:border-primary/40 hover:shadow-md">
+    <Card className="group transition-all hover:border-primary hover:shadow-xl hover:scale-[1.02] border-primary/20 dark:border-primary/30 bg-gradient-to-br from-white to-primary/5 dark:from-slate-800 dark:to-slate-800/50">
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
         <div className="flex-1">
           <h3
             onClick={() => onClick?.(cita)}
-            className="cursor-pointer font-semibold text-foreground group-hover:text-primary"
+            className="cursor-pointer font-bold text-foreground dark:text-cyan-50 group-hover:text-primary dark:group-hover:text-cyan-300 transition-all"
           >
             {cita.titulo}
           </h3>
-          <div className="mt-2 flex flex-wrap gap-2 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Calendar className="h-4 w-4" />
+          <div className="mt-2 flex flex-wrap gap-2 text-sm text-muted-foreground dark:text-slate-300">
+            <span className="flex items-center gap-1 font-medium">
+              <div className="rounded-md gradient-primary p-0.5 shadow-sm">
+                <Calendar className="h-3.5 w-3.5 text-white" />
+              </div>
               {formatDate(cita.fecha)}
             </span>
-            <span className="flex items-center gap-1">
-              <Clock className="h-4 w-4" />
+            <span className="flex items-center gap-1 font-medium">
+              <div className="rounded-md gradient-secondary p-0.5 shadow-sm">
+                <Clock className="h-3.5 w-3.5 text-white" />
+              </div>
               {cita.hora_inicio}
             </span>
           </div>
@@ -131,20 +135,20 @@ export function CitaCard({ cita, onEdit, onDelete, onClick, variant = 'default' 
       </CardHeader>
       <CardContent>
         {cita.lugar && (
-          <div className="mb-2 flex items-center gap-1 text-sm text-muted-foreground">
+          <div className="mb-2 flex items-center gap-1 text-sm text-muted-foreground dark:text-slate-300">
             <MapPin className="h-4 w-4" />
             {cita.lugar}
           </div>
         )}
-        {cita.descripcion && <p className="text-sm text-muted-foreground">{cita.descripcion}</p>}
+        {cita.descripcion && <p className="text-sm text-muted-foreground dark:text-slate-300 leading-relaxed">{cita.descripcion}</p>}
         <div className="mt-3 flex gap-2">
           {upcoming && (
-            <Badge variant="default" className="text-xs">
+            <Badge variant="default" className="text-xs font-semibold gradient-success text-white shadow-sm">
               Próxima
             </Badge>
           )}
           {past && (
-            <Badge variant="secondary" className="text-xs">
+            <Badge variant="secondary" className="text-xs font-medium dark:bg-slate-700 dark:text-slate-300">
               Pasada
             </Badge>
           )}

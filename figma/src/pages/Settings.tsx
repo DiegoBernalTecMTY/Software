@@ -1,28 +1,48 @@
 import { useState, useEffect } from 'react';
-import { User, Save, Calendar, CheckCircle2, Link2 } from 'lucide-react';
+import { User, Save, Calendar, CheckCircle2, Link2, ArrowLeft, Brain, Sparkles, Lock, Eye, EyeOff, Moon, Sun } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { Textarea } from '../components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Separator } from '../components/ui/separator';
+import { Switch } from '../components/ui/switch';
 import { toast } from 'sonner@2.0.3';
 import type { Usuario } from '../utils/api';
+import { authApi } from '../utils/api';
+import { useTheme } from '../utils/theme';
 
 interface SettingsProps {
   user: Usuario;
   onUpdateUser: (id: string, data: Partial<Usuario>) => Promise<void>;
   onRefreshUser: () => void;
+  onNavigate?: (page: string) => void;
 }
 
-export function Settings({ user, onUpdateUser, onRefreshUser }: SettingsProps) {
+export function Settings({ user, onUpdateUser, onRefreshUser, onNavigate }: SettingsProps) {
+  const { theme, toggleTheme } = useTheme();
   const [formData, setFormData] = useState({
     nombre: user.nombre || '',
     email: user.email || '',
+    instrucciones_agente: user.instrucciones_agente || '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  
+  // Password change states
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [passwordErrors, setPasswordErrors] = useState<Record<string, string>>({});
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordSuccessMessage, setPasswordSuccessMessage] = useState<string | null>(null);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   // Calendar integration states
   const [googleConnected, setGoogleConnected] = useState(false);
@@ -33,6 +53,7 @@ export function Settings({ user, onUpdateUser, onRefreshUser }: SettingsProps) {
     setFormData({
       nombre: user.nombre || '',
       email: user.email || '',
+      instrucciones_agente: user.instrucciones_agente || '',
     });
   }, [user]);
 
@@ -62,7 +83,11 @@ export function Settings({ user, onUpdateUser, onRefreshUser }: SettingsProps) {
     }
 
     // Check if anything changed
-    if (formData.nombre === user.nombre && formData.email === user.email) {
+    if (
+      formData.nombre === user.nombre && 
+      formData.email === user.email &&
+      formData.instrucciones_agente === (user.instrucciones_agente || '')
+    ) {
       setSuccessMessage('No hay cambios para guardar');
       return;
     }
@@ -82,15 +107,22 @@ export function Settings({ user, onUpdateUser, onRefreshUser }: SettingsProps) {
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const fieldName = e.target.name;
+    const fieldValue = e.target.value;
+    
+    setFormData((prev) => ({ 
+      ...prev, 
+      [fieldName]: fieldValue 
+    }));
+    
     setSuccessMessage(null);
+    
     // Clear error for this field
-    if (errors[name]) {
+    if (errors[fieldName]) {
       setErrors((prev) => {
         const newErrors = { ...prev };
-        delete newErrors[name];
+        delete newErrors[fieldName];
         return newErrors;
       });
     }
@@ -134,18 +166,147 @@ export function Settings({ user, onUpdateUser, onRefreshUser }: SettingsProps) {
     toast.success('Outlook Calendar desconectado');
   };
 
+  const validatePasswordForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!passwordData.currentPassword) {
+      newErrors.currentPassword = 'La contraseña actual es obligatoria';
+    }
+
+    if (!passwordData.newPassword) {
+      newErrors.newPassword = 'La nueva contraseña es obligatoria';
+    } else if (passwordData.newPassword.length < 8) {
+      newErrors.newPassword = 'La contraseña debe tener al menos 8 caracteres';
+    } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(passwordData.newPassword)) {
+      newErrors.newPassword = 'Debe incluir mayúsculas, minúsculas y números';
+    }
+
+    if (!passwordData.confirmPassword) {
+      newErrors.confirmPassword = 'Confirma tu nueva contraseña';
+    } else if (passwordData.newPassword !== passwordData.confirmPassword) {
+      newErrors.confirmPassword = 'Las contraseñas no coinciden';
+    }
+
+    if (passwordData.currentPassword && passwordData.newPassword === passwordData.currentPassword) {
+      newErrors.newPassword = 'La nueva contraseña debe ser diferente a la actual';
+    }
+
+    setPasswordErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fieldName = e.target.name;
+    const fieldValue = e.target.value;
+    
+    setPasswordData((prev) => ({ 
+      ...prev, 
+      [fieldName]: fieldValue 
+    }));
+    
+    setPasswordSuccessMessage(null);
+    
+    // Clear error for this field
+    if (passwordErrors[fieldName]) {
+      setPasswordErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors[fieldName];
+        return newErrors;
+      });
+    }
+  };
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordSuccessMessage(null);
+
+    if (!validatePasswordForm()) {
+      return;
+    }
+
+    setIsChangingPassword(true);
+
+    try {
+      await authApi.changePassword(
+        user.objectId!,
+        passwordData.currentPassword,
+        passwordData.newPassword
+      );
+      
+      // Reset form
+      setPasswordData({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+      });
+      
+      setPasswordSuccessMessage('Contraseña actualizada correctamente');
+      toast.success('Contraseña actualizada correctamente');
+    } catch (err: any) {
+      setPasswordErrors({
+        submit: err.message || 'Error al cambiar la contraseña. Verifica que tu contraseña actual sea correcta.',
+      });
+      toast.error('Error al cambiar la contraseña');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-[800px] p-4 md:p-6">
         <div className="mb-6">
+          {onNavigate && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onNavigate('dashboard')}
+              className="mb-4"
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Volver al inicio
+            </Button>
+          )}
           <h1 className="mb-2">Configuración</h1>
           <p className="text-muted-foreground">
             Gestiona tu perfil y preferencias de cuenta
           </p>
         </div>
 
+        {/* Appearance settings */}
+        <Card className="animate-scale-in">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              {theme === 'dark' ? (
+                <Moon className="h-5 w-5 text-primary" />
+              ) : (
+                <Sun className="h-5 w-5 text-primary" />
+              )}
+              Apariencia
+            </CardTitle>
+            <CardDescription>
+              Personaliza cómo se ve la aplicación
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="theme-toggle">Modo oscuro</Label>
+                <p className="text-sm text-muted-foreground">
+                  Activa el tema oscuro con colores vibrantes
+                </p>
+              </div>
+              <Switch
+                id="theme-toggle"
+                checked={theme === 'dark'}
+                onCheckedChange={toggleTheme}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Profile settings */}
-        <Card>
+        <Card className="animate-scale-in">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <User className="h-5 w-5" />
@@ -208,6 +369,208 @@ export function Settings({ user, onUpdateUser, onRefreshUser }: SettingsProps) {
                 <Button type="submit" disabled={isSubmitting}>
                   <Save className="mr-2 h-4 w-4" />
                   {isSubmitting ? 'Guardando...' : 'Guardar cambios'}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* AI Agent Instructions */}
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Brain className="h-5 w-5" />
+              Instrucciones para el Agente
+            </CardTitle>
+            <CardDescription>
+              Enseña al agente tus preferencias y reglas para crear citas más inteligentes
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="instrucciones_agente">
+                  Preferencias y reglas personales
+                </Label>
+                <Textarea
+                  id="instrucciones_agente"
+                  name="instrucciones_agente"
+                  placeholder={`Ejemplo:\n\n• Siempre prefiero las citas por la mañana, entre 9am y 12pm\n• Los lunes tengo reunión de equipo a las 10am, no agendar nada a esa hora\n• Necesito 15 minutos de buffer entre citas consecutivas\n• Las citas médicas deben ser en el Hospital Central\n• Recordatorios: 1 hora antes para citas médicas, 30 min para las demás\n• No agendar citas los viernes por la tarde\n• Reuniones de trabajo preferiblemente en la oficina del centro`}
+                  value={formData.instrucciones_agente}
+                  onChange={handleChange}
+                  rows={12}
+                  className="resize-none font-mono text-sm"
+                  disabled={isSubmitting}
+                />
+                <div className="flex items-start gap-2 rounded-lg bg-primary/5 p-3 text-xs">
+                  <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <div className="space-y-1">
+                    <p className="font-medium text-primary">
+                      ¿Cómo usar las instrucciones?
+                    </p>
+                    <p className="text-muted-foreground leading-relaxed">
+                      El agente utilizará estas instrucciones para hacer sugerencias más personalizadas
+                      cuando crees o modifiques citas. Puedes incluir horarios preferidos, lugares
+                      frecuentes, tiempos de recordatorio, restricciones de disponibilidad, y cualquier
+                      otra regla que quieras que el agente conozca.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {errors.submit && (
+                <Alert variant="destructive">
+                  <AlertDescription>{errors.submit}</AlertDescription>
+                </Alert>
+              )}
+
+              {successMessage && (
+                <Alert className="border-success bg-success/10 text-success">
+                  <AlertDescription>{successMessage}</AlertDescription>
+                </Alert>
+              )}
+
+              <div className="flex justify-end">
+                <Button type="submit" disabled={isSubmitting}>
+                  <Save className="mr-2 h-4 w-4" />
+                  {isSubmitting ? 'Guardando...' : 'Guardar instrucciones'}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Change Password */}
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5" />
+              Cambiar contraseña
+            </CardTitle>
+            <CardDescription>
+              Actualiza tu contraseña para mantener tu cuenta segura
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handlePasswordSubmit} className="space-y-4">
+              {/* Current Password */}
+              <div className="space-y-2">
+                <Label htmlFor="currentPassword">Contraseña actual</Label>
+                <div className="relative">
+                  <Input
+                    id="currentPassword"
+                    name="currentPassword"
+                    type={showCurrentPassword ? "text" : "password"}
+                    placeholder="Ingresa tu contraseña actual"
+                    value={passwordData.currentPassword}
+                    onChange={handlePasswordChange}
+                    className={passwordErrors.currentPassword ? 'border-destructive pr-10' : 'pr-10'}
+                    disabled={isChangingPassword}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showCurrentPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+                {passwordErrors.currentPassword && (
+                  <p className="text-xs text-destructive">{passwordErrors.currentPassword}</p>
+                )}
+              </div>
+
+              <Separator />
+
+              {/* New Password */}
+              <div className="space-y-2">
+                <Label htmlFor="newPassword">Nueva contraseña</Label>
+                <div className="relative">
+                  <Input
+                    id="newPassword"
+                    name="newPassword"
+                    type={showNewPassword ? "text" : "password"}
+                    placeholder="Mínimo 8 caracteres"
+                    value={passwordData.newPassword}
+                    onChange={handlePasswordChange}
+                    className={passwordErrors.newPassword ? 'border-destructive pr-10' : 'pr-10'}
+                    disabled={isChangingPassword}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showNewPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+                {passwordErrors.newPassword && (
+                  <p className="text-xs text-destructive">{passwordErrors.newPassword}</p>
+                )}
+              </div>
+
+              {/* Confirm Password */}
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirmar nueva contraseña</Label>
+                <div className="relative">
+                  <Input
+                    id="confirmPassword"
+                    name="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    placeholder="Repite tu nueva contraseña"
+                    value={passwordData.confirmPassword}
+                    onChange={handlePasswordChange}
+                    className={passwordErrors.confirmPassword ? 'border-destructive pr-10' : 'pr-10'}
+                    disabled={isChangingPassword}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+                {passwordErrors.confirmPassword && (
+                  <p className="text-xs text-destructive">{passwordErrors.confirmPassword}</p>
+                )}
+              </div>
+
+              {/* Password requirements hint */}
+              <Alert>
+                <AlertDescription className="text-xs">
+                  La contraseña debe tener al menos 8 caracteres e incluir mayúsculas, minúsculas y números.
+                </AlertDescription>
+              </Alert>
+
+              {passwordErrors.submit && (
+                <Alert variant="destructive">
+                  <AlertDescription>{passwordErrors.submit}</AlertDescription>
+                </Alert>
+              )}
+
+              {passwordSuccessMessage && (
+                <Alert className="border-success bg-success/10 text-success">
+                  <AlertDescription>{passwordSuccessMessage}</AlertDescription>
+                </Alert>
+              )}
+
+              <div className="flex justify-end">
+                <Button type="submit" disabled={isChangingPassword}>
+                  <Save className="mr-2 h-4 w-4" />
+                  {isChangingPassword ? 'Actualizando...' : 'Actualizar contraseña'}
                 </Button>
               </div>
             </form>
