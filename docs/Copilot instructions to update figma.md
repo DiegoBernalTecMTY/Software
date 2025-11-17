@@ -105,6 +105,18 @@ Keep this file updated with any new problems found during future syncs.
    - After copying run `cd frontend; npm install` to reconcile dependencies.
    - If `package.json` changed, inspect `devDependencies` and `dependencies` for typing packages like `@types/react`, `typescript` etc.
 
+   9) Voice API endpoint mismatch between Figma docs and backend
+
+       Symptom: The `figma/` source and some frontend docs reference `POST /api/ai-agent/voice` (and `/api/ai-agent/voice-stream`) while the running backend provides `POST /api/ai/voice` in `app.py`.
+
+       Cause: Historical naming differences between older agent API and the newer `app.py` endpoints; sync copies the `figma/` docs and examples which may still point to the older path.
+
+       Fix/check:
+       - Update frontend docs/examples to use `/api/ai/voice` (we updated `frontend/src/VOICE-AI-INTEGRATION.md` and `frontend/src/api-examples.md`).
+       - Keep the server-side transcription/integration in `app.py` as the single source of truth for audio transcription and agent voice processing (`/api/ai/voice`). Do not overwrite `app.py` from `figma/` sources during future syncs.
+       - If adding a streaming endpoint later (e.g., `/api/ai/voice-stream`), implement it server-side and document in this file before updating frontend examples.
+
+
 ## Debugging tips (quick commands)
 
 - Show Vite URL and tail its terminal logs (in the terminal where `npm run dev` is running).
