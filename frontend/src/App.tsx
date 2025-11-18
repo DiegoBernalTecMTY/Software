@@ -113,16 +113,77 @@ export default function App() {
   };
 
   const handleCreateCita = async (data: Partial<Cita>) => {
-    await api.citas.create(data as any);
-    toast.success(`Cita creada — ${data.fecha}, ${data.hora_inicio}`);
+    // Create the cita, then optionally create a linked notification
+    const created = await api.citas.create(data as any);
+
+    try {
+      if (data.notificacion && data.notificacion.activa && created.objectId) {
+        const minutos = data.notificacion.tiempo_anticipacion ?? 60;
+        const scheduleDate = new Date(`${created.fecha}T${created.hora_inicio}:00`);
+        scheduleDate.setMinutes(scheduleDate.getMinutes() - minutos);
+
+        await api.notificaciones.create({
+          citaObjectId: created.objectId,
+          schedule_at: scheduleDate.toISOString(),
+          reminder_offset: minutos,
+          message: data.notificacion.mensaje || '',
+          channel: 'in_app',
+        } as any);
+      }
+    } catch (e) {
+      console.error('Error creating notification for cita:', e);
+    }
+
+    toast.success(`Cita creada — ${created.fecha}, ${created.hora_inicio}`);
   };
 
   const handleUpdateCita = async (id: string, data: Partial<Cita>) => {
-    await api.citas.update(id, data);
+    // Update the cita first
+    const updated = await api.citas.update(id, data);
+
+    try {
+      // Remove any existing notifications for this cita (simpler than update)
+      const existing = await api.notificaciones.list(`citaObjectId = '${id}'`);
+      for (const n of existing) {
+        if (n.objectId) {
+          await api.notificaciones.delete(n.objectId);
+        }
+      }
+
+      // If notification is active in the updated data, create a new one
+      if (data.notificacion && data.notificacion.activa && updated.objectId) {
+        const minutos = data.notificacion.tiempo_anticipacion ?? 60;
+        const scheduleDate = new Date(`${updated.fecha}T${updated.hora_inicio}:00`);
+        scheduleDate.setMinutes(scheduleDate.getMinutes() - minutos);
+
+        await api.notificaciones.create({
+          citaObjectId: updated.objectId,
+          schedule_at: scheduleDate.toISOString(),
+          reminder_offset: minutos,
+          message: data.notificacion.mensaje || '',
+          channel: 'in_app',
+        } as any);
+      }
+    } catch (e) {
+      console.error('Error syncing notifications for updated cita:', e);
+    }
+
     toast.success('Cita actualizada correctamente');
   };
 
   const handleDeleteCita = async (id: string) => {
+    try {
+      // Delete all notifications linked to this cita first
+      const existing = await api.notificaciones.list(`citaObjectId = '${id}'`);
+      for (const n of existing) {
+        if (n.objectId) {
+          await api.notificaciones.delete(n.objectId);
+        }
+      }
+    } catch (e) {
+      console.error('Error deleting notifications for cita:', e);
+    }
+
     await api.citas.delete(id);
     toast.success('Cita eliminada');
   };

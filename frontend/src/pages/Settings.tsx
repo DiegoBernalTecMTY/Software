@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Separator } from '../components/ui/separator';
 import { Switch } from '../components/ui/switch';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 import type { Usuario } from '../utils/api';
 import { authApi } from '../utils/api';
 import { useTheme } from '../utils/theme';

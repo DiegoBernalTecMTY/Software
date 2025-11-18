@@ -4,7 +4,7 @@ import json
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 
-import functools
+from typing import Optional, Annotated
 
 from langchain.agents import create_agent
 from langchain_core.prompts import PromptTemplate
@@ -12,6 +12,12 @@ from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langgraph.checkpoint.memory import InMemorySaver
+
+import os
+
+import json
+
+from groq import Groq
 
 # Load environment variables from .env file
 load_dotenv()
@@ -40,17 +46,52 @@ def create_tools(user_token: str):
     print(f"✅ Creating tools with user_token: {user_token}")  # Debug
     @tool
     def create_appointment(titulo: str, fecha: str, hora_inicio: str, lugar: str = "Por definir", descripcion: str = "") -> str:
-        """Create a new appointment for the user."""
+        """
+        Create a new appointment for the user.
+
+        The database schema is provided in the system prompt.
+        
+        Args:
+            titulo: The title/name of the appointment
+            fecha: The date in YYYY-MM-DD format
+            hora_inicio: The time in HH:MM format
+            lugar: The location of the appointment
+            descripcion: Additional description or notes about the appointment
+        
+        Returns:
+            Confirmation message with appointment details
+        """
         return _create_appointment_impl(titulo, fecha, hora_inicio, lugar, descripcion, user_token)
 
     @tool
-    def list_appointments(where_clause: str = None) -> str:
-        """List appointments for the user, optionally filtered by a where clause."""
+    def list_appointments(where_clause: Annotated[Optional[str], "Optional SQL WHERE clause. If not provided, list all appointments."] = None
+    ) -> str:
+        """
+        List all appointments for the user.
+
+        The database schema is provided in the system prompt.
+        
+        Args:
+            where_clause: Optional SQL WHERE clause to filter appointments. 
+                         Examples: "titulo LIKE '%dentista%'" or "fecha >= '2025-12-01' AND fecha <= '2025-12-31'"
+        
+        Returns:
+            A JSON string containing the list of appointments or an error message.
+        """
         return _list_appointments_impl(user_token, where_clause)
 
     @tool
     def update_appointment(object_id: str, updates: dict) -> str:
-        """Update an existing appointment identified by object_id with the provided updates."""
+        """
+        Update an existing appointment.
+        
+        Args:
+            object_id: The ID of the appointment to update
+            updates: A dictionary of fields to update with their new values
+        
+        Returns:
+            Confirmation message
+        """
         return _update_appointment_impl(object_id, updates, user_token)
 
     @tool
@@ -135,6 +176,27 @@ INSTRUCCIONES DE OPERACIÓN:
 6.  **Formato de Respuesta**: Responde usando el formato ReAct, que incluye tu pensamiento, la acción a tomar y la observación del resultado de la herramienta.
 
 Si al usar las herramientas encuentras errores, como que el usuario no especific'o un rango de fechas, llama de nuevo a la herramienta con un rango de fechas adecuado y corto e informa al usuario sobre el rango de dias que le est'as mostrando.
+
+Si el usuario te solicita crear citas recurrentes, es decir que se repitan con cualquier preiodicidad, confirma la periodicidad y el rango de fechas en el cual crear las citas si el usuario no la ha especificado y llama varias veces a la herramienta de creacion de citas para crear cada una de las citas individuales.
+
+Si el usuario te pide que realices una acción que no está relacionada con la gestión de citas, responde educadamente que solo puedes ayudar con la gestión de citas.\
+
+En los campos de texto como título, descripción y lugar, usa siempre la primera letra mayúscula y el resto minúscula, a menos que el usuario especifique lo contrario.
+Ejemplos:
+- Listar citas de diciembre 2025: where_clause="fecha >= '2025-12-01' AND fecha <= '2025-12-31'"
+- Listar citas de una fecha específica: where_clause="fecha = '2025-12-15'"
+- Listar por tipo: where_clause="titulo LIKE '%gimnasio%'"
+
+"""
+
+schema_description = """
+
+Schema de la base se datos - tabla 'citas':
+
+table fields and names: descripcion (STRING Max Length: 250), duracion_minutos (DOUBLE), fecha (DATETIME), hora_inicio (STRING Max Length: 250), lugar (STRING Max Length: 250), timezone (STRING Max Length: 250), titulo (STRING Max Length: 250), usuario (STRING Max Length: 250), ownerId (STRING Max Length: 36), created (DATETIME), updated (DATETIME)
+
+Las columnas 'object_id', 'created', 'updated', 'Cupdated' son gestionadas automáticamente y no deben ser modificadas directamente.
+
 """
 
     
@@ -156,7 +218,7 @@ class Agente_de_Citas:
         self.agent = create_agent(
             model=llm,
             tools=tools,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=SYSTEM_PROMPT+schema_description,
             checkpointer=checkpointer
         )
 
@@ -184,6 +246,30 @@ class Agente_de_Citas:
         
         return {"output": output, "session_id": self.session_id}
 
+def transcription_service(audio):
+    """Stub for transcription service"""
+    client = Groq(api_key=GROQ_API_KEY)
+    transcription = client.audio.transcriptions.create(
+
+    file=audio, # Required audio file
+
+    model="whisper-large-v3-turbo", # Required model to use for transcription
+
+    prompt="Este es un audio de un usuario dándole instrucciones a un agente inteligente de organización de citas y cronogramas. Por favor transcribelo a texto en el idioma español.",  # Optional
+
+    response_format="verbose_json",  # Optional
+
+    timestamp_granularities = ["word", "segment"], # Optional (must set response_format to "json" to use and can specify "word", "segment" (default), or both)
+
+    language="es",  # Optional
+
+    temperature=0.0  # Optional
+
+    )
+
+    # To print only the transcription text, you'd use print(transcription.text) (here we're printing the entire transcription object to access timestamps)
+    
+    return transcription.text
 
 
 # Example of how to use it for testing

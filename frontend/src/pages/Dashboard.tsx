@@ -6,8 +6,9 @@ import { Card } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { NotificationsPanel } from '../components/NotificationsPanel';
 import { Confetti } from '../components/Confetti';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 import type { Cita, CommandResponse } from '../utils/api';
+import { getAuthToken } from '../utils/api';
 
 interface DashboardProps {
   citas: Cita[];
@@ -36,6 +37,11 @@ export function Dashboard({ citas, onProcessCommand, onNavigate, userName }: Das
   const [isListening, setIsListening] = useState(false);
   const [isVoiceSupported, setIsVoiceSupported] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const recordingTimeoutRef = useRef<number | null>(null);
+  // MediaRecorder refs for server-backed transcription fallback
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recorderStreamRef = useRef<MediaStream | null>(null);
 
   // Welcome message on mount
   useEffect(() => {
@@ -84,6 +90,25 @@ export function Dashboard({ citas, onProcessCommand, onNavigate, userName }: Das
       recognition.onstart = () => {
         setIsListening(true);
         toast.info('Escuchando... Habla ahora');
+        // Safety timeout: stop recognition after 60s to avoid stuck microphone
+        try {
+          if (recordingTimeoutRef.current) {
+            clearTimeout(recordingTimeoutRef.current);
+          }
+          recordingTimeoutRef.current = window.setTimeout(() => {
+            try {
+              recognition.stop();
+            } catch (e) {
+              try {
+                recognition.abort();
+              } catch {}
+            }
+            setIsListening(false);
+            toast.error('Se detuvo la grabación automáticamente (tiempo máximo alcanzado)');
+          }, 60000) as unknown as number;
+        } catch (e) {
+          // ignore
+        }
       };
       
       recognition.onresult = (event: any) => {
@@ -132,17 +157,66 @@ export function Dashboard({ citas, onProcessCommand, onNavigate, userName }: Das
       
       recognition.onend = () => {
         setIsListening(false);
+        if (recordingTimeoutRef.current) {
+          clearTimeout(recordingTimeoutRef.current);
+          recordingTimeoutRef.current = null;
+        }
       };
       
       recognitionRef.current = recognition;
     } else {
-      setIsVoiceSupported(false);
+      // If SpeechRecognition is not available, check for MediaRecorder/getUserMedia support
+      const hasMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && typeof (window as any).MediaRecorder !== 'undefined';
+      setIsVoiceSupported(Boolean(hasMedia));
       console.warn('Speech Recognition not supported in this browser');
     }
     
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
+      // Ensure any active recognition is stopped on unmount
+      try {
+        if (recognitionRef.current) {
+          try {
+            recognitionRef.current.stop();
+          } catch (e) {
+            try {
+              recognitionRef.current.abort();
+            } catch {}
+          }
+        }
+      } catch (e) {
+        // swallow
+      }
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+        recordingTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  // Ensure MediaRecorder is cleaned up on unmount/navigation
+  useEffect(() => {
+    return () => {
+      try {
+        if (mediaRecorderRef.current) {
+          try {
+            if (mediaRecorderRef.current.state === 'recording') {
+              mediaRecorderRef.current.stop();
+            }
+          } catch (e) {}
+          mediaRecorderRef.current = null;
+        }
+      } catch (e) {}
+
+      try {
+        if (recorderStreamRef.current) {
+          recorderStreamRef.current.getTracks().forEach((t) => t.stop());
+          recorderStreamRef.current = null;
+        }
+      } catch (e) {}
+
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+        recordingTimeoutRef.current = null;
       }
     };
   }, []);
@@ -231,26 +305,131 @@ export function Dashboard({ citas, onProcessCommand, onNavigate, userName }: Das
   };
 
   const handleVoiceInput = () => {
-    if (!isVoiceSupported) {
-      toast.error('Tu navegador no soporta entrada por voz. Prueba con Chrome o Edge.');
-      return;
-    }
-    
-    if (isListening) {
-      // Stop listening
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    } else {
-      // Start listening
-      if (recognitionRef.current) {
+    // Two modes:
+    // 1) If SpeechRecognition is available, use it (client-side live transcription)
+    // 2) Otherwise, fall back to MediaRecorder -> upload to server /api/ai/transcribe
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (SpeechRecognition && recognitionRef.current) {
+      // Toggle recognition with robust start/stop handling
+      if (isListening) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {
+          try { recognitionRef.current.abort(); } catch {}
+        }
+        setIsListening(false);
+        if (recordingTimeoutRef.current) {
+          clearTimeout(recordingTimeoutRef.current);
+          recordingTimeoutRef.current = null;
+        }
+      } else {
         try {
           recognitionRef.current.start();
         } catch (error) {
           console.error('Error starting speech recognition:', error);
           toast.error('Error al iniciar el reconocimiento de voz');
+          try { recognitionRef.current.abort(); } catch {}
         }
       }
+      return;
+    }
+
+    // Fallback: MediaRecorder
+    const startRecording = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recorderStreamRef.current = stream;
+        audioChunksRef.current = [];
+        const mr = new (window as any).MediaRecorder(stream);
+        mediaRecorderRef.current = mr;
+
+        mr.ondataavailable = (ev: any) => {
+          if (ev.data && ev.data.size > 0) audioChunksRef.current.push(ev.data);
+        };
+
+        mr.onstart = () => {
+          setIsListening(true);
+          toast.info('Grabando...');
+          // safety timeout for media recorder (60s)
+          try {
+            if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
+            recordingTimeoutRef.current = window.setTimeout(() => {
+              try {
+                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                  mediaRecorderRef.current.stop();
+                }
+              } catch (e) {}
+              setIsListening(false);
+              toast.error('Se detuvo la grabación automáticamente (tiempo máximo alcanzado)');
+            }, 60000) as unknown as number;
+          } catch (e) {}
+        };
+
+        mr.start();
+      } catch (err) {
+        console.error('Error accessing microphone:', err);
+        toast.error('No se pudo acceder al micrófono');
+      }
+    };
+
+    const stopAndUpload = async () => {
+      const mr = mediaRecorderRef.current;
+      if (!mr) return;
+
+      return new Promise<void>((resolve) => {
+        mr.onstop = async () => {
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const fd = new FormData();
+          fd.append('audio', blob, 'recording.webm');
+
+          const token = getAuthToken();
+          try {
+            const base = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_API_BASE) || 'http://localhost:5000';
+            const resp = await fetch(`${base}/api/ai/transcribe`, {
+              method: 'POST',
+              headers: token ? { 'user-token': token } : undefined,
+              body: fd,
+            });
+            const json = await resp.json().catch(() => ({}));
+            if (resp.ok && json.transcript !== undefined) {
+              setInput(json.transcript);
+              toast.success('Transcripción cargada');
+            } else {
+              toast.error(json.error || 'Error en la transcripción');
+            }
+          } catch (e) {
+            console.error('Upload error:', e);
+            toast.error('Error al subir el audio');
+          } finally {
+            // cleanup
+            try {
+              recorderStreamRef.current?.getTracks().forEach((t) => t.stop());
+            } catch (e) {}
+            recorderStreamRef.current = null;
+            mediaRecorderRef.current = null;
+            if (recordingTimeoutRef.current) {
+              clearTimeout(recordingTimeoutRef.current);
+              recordingTimeoutRef.current = null;
+            }
+            setIsListening(false);
+            resolve();
+          }
+        };
+
+        try {
+          mr.stop();
+        } catch (e) {
+          console.warn('Error stopping recorder', e);
+          resolve();
+        }
+      });
+    };
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      void stopAndUpload();
+    } else {
+      void startRecording();
     }
   };
 
@@ -389,25 +568,34 @@ export function Dashboard({ citas, onProcessCommand, onNavigate, userName }: Das
             <div className="mx-auto max-w-3xl">
               <div className="flex items-end gap-3">
                 {/* Voice input button - Left */}
-                <Button
-                  type="button"
-                  size="icon"
-                  variant={isListening ? "default" : "outline"}
-                  className={`h-[52px] w-[52px] shrink-0 rounded-full transition-all duration-300 ${
-                    isListening 
-                      ? 'animate-pulse gradient-success text-white shadow-glow-primary scale-110' 
-                      : 'border-primary/30 dark:border-primary/40 hover:border-primary hover:shadow-md hover:scale-105 dark:text-cyan-300'
-                  }`}
-                  onClick={handleVoiceInput}
-                  disabled={isProcessing || !isVoiceSupported}
-                  title={isListening ? 'Detener grabación' : 'Dictar por voz'}
-                >
-                  {isListening ? (
-                    <MicOff className="h-5 w-5" />
-                  ) : (
+                {isListening ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleVoiceInput}
+                    disabled={isProcessing}
+                    aria-pressed={true}
+                    aria-label="Detener grabación"
+                    title="Detener grabación"
+                    className="flex items-center gap-2 rounded-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 shadow-lg"
+                  >
+                    <MicOff className="h-4 w-4" />
+                    <span className="text-sm font-medium">Detener</span>
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    className={`h-[52px] w-[52px] shrink-0 rounded-full transition-all duration-300 border-primary/30 dark:border-primary/40 hover:border-primary hover:shadow-md hover:scale-105 dark:text-cyan-300`}
+                    onClick={handleVoiceInput}
+                    disabled={isProcessing}
+                    title="Dictar por voz"
+                    aria-label="Dictar por voz"
+                  >
                     <Mic className="h-5 w-5" />
-                  )}
-                </Button>
+                  </Button>
+                )}
                 
                 {/* Text input area */}
                 <div className="relative flex-1">

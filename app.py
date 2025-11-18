@@ -4,7 +4,8 @@ import requests
 import os
 import json
 from dotenv import load_dotenv
-from ai_agent import Agente_de_Citas
+from ai_agent import Agente_de_Citas, transcription_service
+import io
 
 # Load environment variables from .env file
 load_dotenv()
@@ -104,6 +105,8 @@ def debug_env():
 # by the frontend (`/data/Cita`). This ensures consistent behavior
 # regardless of calling `/data/citas` or `/data/Cita` on our proxy.
 BACKENDLESS_CITA_TABLE_URL = f"{BACKENDLESS_BASE_URL}/data/citas"
+# Notifications table URL
+BACKENDLESS_NOTIF_TABLE_URL = f"{BACKENDLESS_BASE_URL}/data/notificaciones"
 
 # Simple in-memory map for tokens obtained via this proxy: user-token -> objectId
 # This permits the server to validate tokens that were issued through our
@@ -266,6 +269,152 @@ def delete_cita(object_id):
     except requests.exceptions.RequestException as e:
         return jsonify({"error": str(e)}), 500
 
+
+# --- Notificaciones (Reminders) CRUD API Endpoints ---
+# These endpoints allow the frontend to list, read and delete notification records
+# The Backendless `notificaciones` table is expected to exist and be protected by
+# ownerId; we forward the `user-token` header and enforce owner filtering when
+# possible (similar to the citas endpoints).
+
+
+@app.route('/data/notificaciones', methods=['GET'])
+@app.route('/data/Notificacion', methods=['GET'])
+def get_notificaciones():
+    user_token = request.headers.get('user-token')
+    user_object_id = get_user_id_from_token(user_token)
+
+    if not user_object_id:
+        # Attempt to extract ownerId from where clause as fallback (dev convenience)
+        agent_where_clause = request.args.get('where')
+        extracted_owner = None
+        if agent_where_clause:
+            import re
+            m = re.search(r"ownerId\s*=\s*'([0-9A-Fa-f-]{36})'", agent_where_clause)
+            if m:
+                extracted_owner = m.group(1)
+                print(f"[AUTH_WARN] Token validation failed; extracted ownerId from query: {extracted_owner}")
+                user_object_id = extracted_owner
+        if not user_object_id:
+            return jsonify({"error": "Invalid or expired token. Please log in again."}), 401
+
+    # Build owner filter and combine with agent where clause if provided
+    owner_filter = f"ownerId = '{user_object_id}'"
+    agent_where_clause = request.args.get('where')
+    if agent_where_clause:
+        final_where = f"{owner_filter} AND ({agent_where_clause})"
+    else:
+        final_where = owner_filter
+
+    try:
+        params = {'where': final_where}
+        headers = {'Content-Type': 'application/json'}
+        if user_token:
+            headers['user-token'] = user_token
+
+        print(f"[DEBUG] Fetching notificaciones from Backendless: url={BACKENDLESS_NOTIF_TABLE_URL} params={params} headers={dict(headers)}")
+        response = requests.get(BACKENDLESS_NOTIF_TABLE_URL, params=params, headers=headers)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        msg = str(e)
+        try:
+            resp = getattr(e, 'response', None)
+            if resp is not None:
+                msg = f"Upstream status={resp.status_code} body={resp.text}"
+        except Exception:
+            pass
+        print(f"[ERROR] Error fetching notificaciones: {msg}")
+        return jsonify({"error": msg}), 500
+
+
+@app.route('/data/notificaciones/<string:object_id>', methods=['GET'])
+@app.route('/data/Notificacion/<string:object_id>', methods=['GET'])
+def get_notificacion_by_id(object_id):
+    try:
+        url = f"{BACKENDLESS_NOTIF_TABLE_URL}/{object_id}"
+        headers = dict(HEADERS)
+        token = request.headers.get('user-token')
+        if token:
+            headers['user-token'] = token
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": str(e), "message": "Failed to retrieve notification from Backendless"}), 500
+
+
+@app.route('/data/notificaciones/<string:object_id>', methods=['DELETE'])
+@app.route('/data/Notificacion/<string:object_id>', methods=['DELETE'])
+def delete_notificacion(object_id):
+    user_token = request.headers.get('user-token')
+    if not get_user_id_from_token(user_token):
+        return jsonify({"error": "Invalid or expired token."}), 401
+
+    try:
+        headers = {'user-token': user_token}
+        url = f"{BACKENDLESS_NOTIF_TABLE_URL}/{object_id}"
+        response = requests.delete(url, headers=headers)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/data/notificaciones', methods=['POST'])
+@app.route('/data/Notificacion', methods=['POST'])
+def create_notificacion():
+    """
+    Create a new notification linked to a cita.
+    Validates that the user-token is present and that the referenced cita
+    belongs to the same user. Forwards the payload to Backendless and
+    returns the created object.
+    """
+    user_token = request.headers.get('user-token')
+    user_object_id = get_user_id_from_token(user_token)
+
+    if not user_object_id:
+        return jsonify({"error": "Invalid or expired token."}), 401
+
+    payload = request.json or {}
+
+    # Support either `citaObjectId` (frontend) or `cita_object_id` (backend)
+    cita_id = payload.get('citaObjectId') or payload.get('cita_object_id') or payload.get('cita')
+    if not cita_id:
+        return jsonify({"error": "Missing cita reference (citaObjectId)."}), 400
+
+    # Verify the cita exists and belongs to this user
+    try:
+        cita_url = f"{BACKENDLESS_CITA_TABLE_URL}/{cita_id}"
+        headers = dict(HEADERS)
+        # include token to allow Backendless to validate ownership where possible
+        if user_token:
+            headers['user-token'] = user_token
+        resp = requests.get(cita_url, headers=headers)
+        resp.raise_for_status()
+        cita_obj = resp.json()
+        owner = cita_obj.get('ownerId') or cita_obj.get('owner') or cita_obj.get('usuario')
+        if owner and owner != user_object_id:
+            return jsonify({"error": "You do not own the referenced cita."}), 403
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Failed to verify cita: {e}"}), 400
+
+    # Forward create to Backendless (Backendless will set ownerId based on token)
+    try:
+        headers = {'user-token': user_token, 'Content-Type': 'application/json'} if user_token else {'Content-Type': 'application/json'}
+        response = requests.post(BACKENDLESS_NOTIF_TABLE_URL, json=payload, headers=headers)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        msg = str(e)
+        try:
+            resp = getattr(e, 'response', None)
+            if resp is not None:
+                msg = f"Upstream status={resp.status_code} body={resp.text}"
+        except Exception:
+            pass
+        print(f"[ERROR] Error creating notificacion: {msg}")
+        return jsonify({"error": msg}), 500
+
 # --- Users / Auth proxy endpoints (Backendless) ---
 
 
@@ -398,6 +547,75 @@ def create_session():
     import uuid
     session_id = str(uuid.uuid4())
     return jsonify({"session_id": session_id}), 200
+
+
+@app.route('/api/ai/transcribe', methods=['POST'])
+def transcribe_audio():
+    """
+    Endpoint stub to receive audio and return a transcription.
+
+    Expected usage (examples):
+      - multipart/form-data with a file field named "audio"
+      - raw audio bytes in the request body
+      - JSON body with a base64-encoded audio payload (optional)
+
+    The function currently validates the request and reads the audio bytes
+    into `audio_bytes`. Replace the placeholder section below with your
+    preferred transcription implementation (local model, cloud API, etc.).
+
+    Response JSON shape expected by the frontend:
+      { "transcript": "...text..." }
+
+    The caller (frontend) should send the transcription back into the
+    main text box. The frontend integration is described in a brief note
+    in the repository README or can be done by calling this endpoint
+    and setting the textarea value to the returned `transcript`.
+    """
+    # Basic auth check consistent with other endpoints
+    user_token = request.headers.get('user-token')
+    if not user_token:
+        return jsonify({"error": "Authentication token is missing."}), 401
+
+    audio_bytes = None
+
+    # 1) multipart/form-data file upload
+    if 'audio' in request.files:
+        audio_file = request.files.get('audio')
+        if audio_file:
+            audio_bytes = audio_file.read()
+
+    # 2) JSON payload with base64 (optional)
+    if audio_bytes is None and request.is_json:
+        body = request.get_json(silent=True) or {}
+        b64 = body.get('audio_base64')
+        if b64:
+            try:
+                import base64
+                audio_bytes = base64.b64decode(b64)
+            except Exception:
+                return jsonify({"error": "Invalid base64 audio payload."}), 400
+
+    # 3) Raw bytes in body
+    if audio_bytes is None:
+        raw = request.get_data()
+        if raw:
+            audio_bytes = raw
+
+    if not audio_bytes:
+        return jsonify({"error": "No audio provided."}), 400
+
+    # Placeholder: developer (you) will implement actual transcription here.
+    # Example:
+    #transcript = transcription_service(audio_bytes, language='es-ES')
+    # For now return an empty transcript and a helpful message so frontend
+    # integration can be completed once you implement the transcription logic.
+    try:
+        f = io.BytesIO(audio_bytes)
+        f.name = 'recording.webm'
+        transcript = transcription_service(f)
+        return jsonify({"transcript": transcript}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # --- Health Check ---
 @app.route('/health', methods=['GET'])

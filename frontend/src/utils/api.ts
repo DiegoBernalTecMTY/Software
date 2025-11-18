@@ -60,6 +60,23 @@ export interface Cita {
   updated?: string;
 }
 
+export interface Notificacion {
+  objectId?: string;
+  ownerId?: string;
+  citaObjectId: string;
+  channel?: 'in_app' | 'email' | 'push';
+  schedule_at?: string; // ISO UTC
+  reminder_offset?: number;
+  message?: string;
+  repeat?: any;
+  sent?: boolean;
+  sent_at?: string;
+  attempts?: number;
+  metadata?: any;
+  created?: string;
+  updated?: string;
+}
+
 export interface LoginResponse {
   objectId: string;
   email: string;
@@ -458,6 +475,52 @@ export const citasApi = {
 };
 
 /**
+ * Notificaciones API
+ */
+export const notificacionesApi = {
+  list: async (where?: string): Promise<Notificacion[]> => {
+    if (USE_MOCK_DATA) {
+      return mockApi.listNotificaciones();
+    }
+    const queryParams = where ? `?where=${encodeURIComponent(where)}` : '';
+    return apiFetch<Notificacion[]>(`/data/notificaciones${queryParams}`, {
+      method: 'GET',
+    });
+  },
+
+  get: async (id: string): Promise<Notificacion> => {
+    if (USE_MOCK_DATA) {
+      return mockApi.getNotificacion(id);
+    }
+    return apiFetch<Notificacion>(`/data/notificaciones/${id}`, {
+      method: 'GET',
+    });
+  },
+
+  delete: async (id: string): Promise<void> => {
+    if (USE_MOCK_DATA) {
+      return mockApi.deleteNotificacion(id);
+    }
+    return apiFetch<void>(`/data/notificaciones/${id}`, {
+      method: 'DELETE',
+    });
+  },
+  /**
+   * Create a new notification record
+   * POST /data/notificaciones
+   */
+  create: async (payload: Partial<Notificacion>): Promise<Notificacion> => {
+    if (USE_MOCK_DATA) {
+      return mockApi.createNotificacion(payload);
+    }
+    return apiFetch<Notificacion>(`/data/notificaciones`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+};
+
+/**
  * Command API (Natural Language Processing via AI Agent)
  */
 export const commandApi = {
@@ -539,5 +602,6 @@ export const commandApi = {
 export default {
   auth: authApi,
   citas: citasApi,
+  notificaciones: notificacionesApi,
   command: commandApi,
 };

@@ -30,6 +30,17 @@ export function CitasList({
   onRefresh,
   onNavigate,
 }: CitasListProps) {
+  // Ensure we refresh the parent appointments list when this view is shown.
+  // This runs on mount and whenever `initialDate` changes (navigation with params).
+  useEffect(() => {
+    try {
+      onRefresh();
+    } catch (e) {
+      // ignore errors from refresh here; parent handles toasts/logging
+      console.error('Error refreshing citas on CitasList mount:', e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDate]);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState(initialDate || '');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
