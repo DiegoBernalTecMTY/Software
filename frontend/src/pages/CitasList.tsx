@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Calendar, LayoutGrid, List as ListIcon } from 'lucide-react';
+import { Plus, Search, Calendar, LayoutGrid, List as ListIcon, ArrowLeft } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { CitaCard } from '../components/CitaCard';
 import { CitaForm } from '../components/CitaForm';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Skeleton } from '../components/ui/skeleton';
+import { Confetti } from '../components/Confetti';
 import type { Cita } from '../utils/api';
 
 interface CitasListProps {
@@ -34,6 +35,8 @@ export function CitasList({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingCita, setEditingCita] = useState<Cita | null>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const filteredCitas = citas.filter((cita) => {
     const matchesSearch =
@@ -60,10 +63,16 @@ export function CitasList({
   const handleDelete = async (cita: Cita) => {
     if (window.confirm(`¿Estás seguro de que quieres eliminar la cita "${cita.titulo}"?`)) {
       try {
-        await onDeleteCita(cita.objectId!);
-        onRefresh();
+        setDeletingId(cita.objectId!);
+        // Pequeño delay para mostrar la animación
+        setTimeout(async () => {
+          await onDeleteCita(cita.objectId!);
+          setDeletingId(null);
+          onRefresh();
+        }, 300);
       } catch (error) {
         console.error('Error deleting cita:', error);
+        setDeletingId(null);
       }
     }
   };
@@ -79,24 +88,40 @@ export function CitasList({
   const handleSubmitCreate = async (data: Partial<Cita>) => {
     await onCreateCita(data);
     setShowCreateForm(false);
+    setShowConfetti(true);
     onRefresh();
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-[1200px] p-4 md:p-6">
+    <>
+      <Confetti active={showConfetti} onComplete={() => setShowConfetti(false)} />
+      <div className="min-h-screen bg-background">
+        <div className="mx-auto max-w-[1200px] p-4 md:p-6">
         {/* Header */}
-        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="mb-2">Mis Citas</h1>
-            <p className="text-muted-foreground">
-              Visualiza y gestiona todas tus citas
-            </p>
+        <div className="mb-6">
+          <div className="mb-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onNavigate('dashboard')}
+              className="mb-2"
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Volver al inicio
+            </Button>
           </div>
-          <Button onClick={() => setShowCreateForm(true)} size="lg">
-            <Plus className="mr-2 h-5 w-5" />
-            Nueva cita
-          </Button>
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h1 className="mb-2">Mis Citas</h1>
+              <p className="text-muted-foreground">
+                Visualiza y gestiona todas tus citas
+              </p>
+            </div>
+            <Button onClick={() => setShowCreateForm(true)} size="lg">
+              <Plus className="mr-2 h-5 w-5" />
+              Nueva cita
+            </Button>
+          </div>
         </div>
 
         {/* Filters and view controls */}
@@ -107,7 +132,7 @@ export function CitasList({
               placeholder="Buscar por título, lugar o descripción..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
+              className="pl-9 text-[rgb(0,0,0)]"
             />
           </div>
           <div className="flex gap-2">
@@ -115,7 +140,7 @@ export function CitasList({
               type="date"
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
-              className="w-full md:w-auto"
+              className="w-full md:w-auto text-[rgb(0,0,0)]"
             />
             {dateFilter && (
               <Button
@@ -164,14 +189,20 @@ export function CitasList({
         ) : sortedCitas.length > 0 ? (
           <div className={viewMode === 'grid' ? 'grid gap-4 md:grid-cols-2' : 'space-y-3'}>
             {sortedCitas.map((cita) => (
-              <CitaCard
+              <div
                 key={cita.objectId}
-                cita={cita}
-                variant={viewMode === 'list' ? 'compact' : 'default'}
-                onClick={(cita) => onNavigate('cita-detail', { cita })}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-              />
+                className={`animate-scale-in ${
+                  deletingId === cita.objectId ? 'animate-scale-out' : ''
+                }`}
+              >
+                <CitaCard
+                  cita={cita}
+                  variant={viewMode === 'list' ? 'compact' : 'default'}
+                  onClick={(cita) => onNavigate('cita-detail', { cita })}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                />
+              </div>
             ))}
           </div>
         ) : (
@@ -202,6 +233,7 @@ export function CitasList({
         initialData={editingCita}
         mode="edit"
       />
-    </div>
+      </div>
+    </>
   );
 }

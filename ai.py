@@ -45,6 +45,13 @@ import traceback
 
 import importlib
 
+# Load .env so LangSmith tracing/project/API keys are available at import time.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 # Detect presence of LangChain package. We won't hard-fail if import paths differ
 # between LangChain major versions; presence is enough for now and we'll continue
 # to use our genai client / REST fallback. If you want a full LangChain runnable
@@ -60,104 +67,56 @@ except Exception:
 # Config: model to call. You can experiment with Gemini/chat or text models.
 # For simple structured-output tasks text-bison-001 is stable; change if you have
 # specific Gemini model names.
-GEN_MODEL = os.environ.get('GEN_MODEL', 'text-bison-001')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+GEN_MODEL = os.environ.get('GEN_MODEL', os.environ.get('GROQ_TEXT_MODEL', 'llama-3.3-70b-versatile'))
+# Use Groq (OpenAI-compatible) by default for generative calls; expect GROQ_API_KEY env var.
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+GROQ_BASE_URL = os.environ.get('GROQ_BASE_URL', 'https://api.groq.com/openai/v1')
 
-# Prefer the new Google GenAI SDK when available (per docs in docs/gemini_api_migration.md)
-try:
-    from google import genai
-    from google.genai import types as genai_types
-    GENAI_AVAILABLE = True
-    # Create a client; it will pick up GEMINI_API_KEY env var if present.
-    # Prefer explicit api_key initialization if a GEMINI_API_KEY is provided.
-    try:
-        if GEMINI_API_KEY:
-            _GENAI_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
-        else:
-            _GENAI_CLIENT = genai.Client()
-    except Exception:
-        print('[WARN] genai.Client(...) failed during initialization:')
-        traceback.print_exc()
-        _GENAI_CLIENT = None
-except Exception:
-    GENAI_AVAILABLE = False
-    _GENAI_CLIENT = None
+# We removed Google GenAI (Gemini) SDK usage; this module will call the
+# Groq (OpenAI-compatible) responses endpoint instead.
 
 
 def _call_generative_api(prompt: str, max_tokens: int = 512, temperature: float = 0.0) -> str:
-    """Call Google Generative REST endpoint and return the text output.
+    """Call the Groq/OpenAI-compatible responses endpoint and return the text output.
 
-    This implementation uses the v1beta2 REST endpoint.
+    Uses `GROQ_API_KEY` and `GROQ_BASE_URL` environment variables. The request
+    body follows the OpenAI/Groq `responses` shape: {"model":..., "input": ...}.
     """
-    # If the official GenAI SDK is available, use it (preferred per migration doc).
-    if GENAI_AVAILABLE and _GENAI_CLIENT is not None:
-        try:
-            # Build a simple config; request plain text/json output by default.
-            # NOTE: do NOT pass a Pydantic class as response_schema here because
-            # the SDK can reject certain generated schema fields (e.g. additional_properties)
-            # leading to InvalidArgument errors. We'll parse the returned text ourselves.
-            cfg = genai_types.GenerateContentConfig(
-                max_output_tokens=max_tokens,
-                temperature=float(temperature),
-                response_mime_type='application/json',
-            )
-            resp = _GENAI_CLIENT.models.generate_content(
-                model=GEN_MODEL,
-                contents=prompt,
-                config=cfg,
-            )
-            # Try common properties for textual output
-            text = getattr(resp, 'text', None)
-            if not text:
-                # newer SDKs may provide candidates/content structure
-                try:
-                    # attempt to access a JSON-dumped representation
-                    return json.dumps(resp, default=lambda o: getattr(o, '__dict__', str(o)), ensure_ascii=False)
-                except Exception:
-                    text = str(resp)
-            else:
-                return text
-        except Exception:
-            # Log full traceback to help debugging and fall through to REST fallback
-            print("[WARN] genai client call failed, falling back to REST:")
-            traceback.print_exc()
+    if not GROQ_API_KEY:
+        raise RuntimeError('GROQ_API_KEY environment variable is not set')
 
-    # Fallback: direct REST call to generativelanguage.googleapis.com (legacy / reliable)
-    if not GEMINI_API_KEY:
-        raise RuntimeError('GEMINI_API_KEY environment variable is not set')
-
-    # The REST endpoint expects the model path to be prefixed with 'models/'
-    model_path = GEN_MODEL if GEN_MODEL.startswith('models/') else f"models/{GEN_MODEL}"
-    url = f"https://generativelanguage.googleapis.com/v1beta2/{model_path}:generate?key={GEMINI_API_KEY}"
+    url = f"{GROQ_BASE_URL.rstrip('/')}/responses"
     payload = {
-        "prompt": {"text": prompt},
-        "temperature": temperature,
-        "maxOutputTokens": max_tokens,
+        "model": GEN_MODEL,
+        "input": prompt,
+        "temperature": float(temperature),
+        "max_output_tokens": int(max_tokens),
     }
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {GROQ_API_KEY}"}
     resp = requests.post(url, json=payload, headers=headers, timeout=30)
     resp.raise_for_status()
     data = resp.json()
-    # Expected keys: 'candidates' -> list -> first -> 'output'
-    # There is some variability between model families; try a few fallbacks.
+
+    # Common patterns: check for output_text, output[0].content, or stringify
     text = None
-    if isinstance(data.get('candidates'), list) and data['candidates']:
-        # Newer APIs return candidates[].content.parts[].text or candidates[].content or candidates[].output
-        candidate = data['candidates'][0]
-        text = candidate.get('output') or candidate.get('content')
-        if not text and isinstance(candidate.get('content'), dict):
-            # try nested parts
-            try:
-                parts = candidate['content'].get('parts') or []
-                text = ''.join(p.get('text', '') for p in parts if isinstance(p, dict))
-            except Exception:
-                text = None
+    if isinstance(data, dict):
+        # Groq/OpenAI responses may include 'output' array or 'output_text'
+        if 'output_text' in data:
+            text = data.get('output_text')
+        elif 'output' in data and isinstance(data['output'], list) and data['output']:
+            first = data['output'][0]
+            # try common fields
+            if isinstance(first, dict):
+                text = first.get('content') or first.get('text') or json.dumps(first)
+            else:
+                text = str(first)
+        elif 'result' in data:
+            text = data.get('result')
     if not text:
-        # older responses might have 'output' at top level
-        text = data.get('output') or data.get('content')
-    if not text:
-        # as last resort, stringify entire response
-        text = json.dumps(data)
+        try:
+            return json.dumps(data, ensure_ascii=False)
+        except Exception:
+            return str(data)
     return text
 
 
@@ -298,7 +257,11 @@ def process_command(texto: str) -> Dict[str, Any]:
     # Normalize keys to expected names (lowercase 'action', 'mensaje', 'resultado')
     result = {
         'action': parsed.get('action', 'none'),
-        'mensaje': parsed.get('mensaje') or parsed.get('message') or 'Interpretación disponible',
+        # If the model didn't provide a user-friendly message, surface the
+        # raw model output so the frontend shows something actionable to
+        # the user instead of the vague 'Interpretación disponible'. Keep
+        # a short truncation to avoid extremely long messages.
+        'mensaje': parsed.get('mensaje') or parsed.get('message') or (raw[:500] if raw else 'Interpretación disponible'),
         'resultado': parsed.get('resultado') or parsed.get('result') or None,
         'updates': parsed.get('updates') or parsed.get('changes') or None,
         'target_id': parsed.get('target_id') or parsed.get('id') or None,

@@ -1,0 +1,19 @@
+{
+    "tests": [
+        {
+            "name": "Voice to Text Transcription Test 1",
+            "audio_file": "C:\\MNA-Software\\tests\\tests_voice\\test_voice_1.wav",
+            "transcription": "Haz una cita a las 10 de la mañana del jueves para ver el partido del barcelona en el bar"
+        },
+        {
+            "name": "Voice to Text Transcription Test 2",
+            "audio_file": "C:\\MNA-Software\\tests\\tests_voice\\test_voice_2.wav",
+            "transcription": "Muestrame que tengo programado el miercoles en la tarde"
+        },
+        {
+            "name": "Voice to Text Transcription Test 3",
+            "audio_file": "C:\\MNA-Software\\tests\\tests_voice\\test_voice_3.wav",
+            "transcription": "Programa un bloque de dos horas de 9 a 11 de la mañana todos los jueves y sabados durante un mes para ir al gimnasio"
+        }
+    ]
+}

@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
+import { Switch } from './ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import {
   Dialog,
   DialogContent,
@@ -11,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
+import { Confetti } from './Confetti';
 import type { Cita } from '../utils/api';
 
 interface CitaFormProps {
@@ -34,9 +37,15 @@ export function CitaForm({
     hora_inicio: '',
     lugar: '',
     descripcion: '',
+    notificacion: {
+      activa: false,
+      mensaje: '',
+      tiempo_anticipacion: 60, // 60 minutos por defecto
+    },
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
 
   useEffect(() => {
     if (initialData) {
@@ -46,6 +55,11 @@ export function CitaForm({
         hora_inicio: initialData.hora_inicio || '',
         lugar: initialData.lugar || '',
         descripcion: initialData.descripcion || '',
+        notificacion: initialData.notificacion || {
+          activa: false,
+          mensaje: '',
+          tiempo_anticipacion: 60,
+        },
       });
     } else {
       setFormData({
@@ -54,6 +68,11 @@ export function CitaForm({
         hora_inicio: '',
         lugar: '',
         descripcion: '',
+        notificacion: {
+          activa: false,
+          mensaje: '',
+          tiempo_anticipacion: 60,
+        },
       });
     }
     setErrors({});
@@ -101,7 +120,16 @@ export function CitaForm({
 
     try {
       await onSubmit(formData);
-      onClose();
+      
+      // Show confetti only when creating a new cita
+      if (mode === 'create') {
+        setShowConfetti(true);
+        setTimeout(() => {
+          onClose();
+        }, 500);
+      } else {
+        onClose();
+      }
     } catch (error: any) {
       setErrors({
         submit: error.message || 'Error al guardar la cita',
@@ -114,31 +142,49 @@ export function CitaForm({
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const fieldName = e.target.name;
+    const fieldValue = e.target.value;
+    
+    setFormData((prev) => ({ 
+      ...prev, 
+      [fieldName]: fieldValue 
+    }));
+    
     // Clear error for this field
-    if (errors[name]) {
+    if (errors[fieldName]) {
       setErrors((prev) => {
         const newErrors = { ...prev };
-        delete newErrors[name];
+        delete newErrors[fieldName];
         return newErrors;
       });
     }
   };
 
+  const handleNotificationChange = (field: string, value: any) => {
+    setFormData((prev) => ({
+      ...prev,
+      notificacion: {
+        ...prev.notificacion,
+        [field]: value,
+      },
+    }));
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>
-            {mode === 'create' ? 'Crear nueva cita' : 'Editar cita'}
-          </DialogTitle>
-          <DialogDescription>
-            {mode === 'create'
-              ? 'Completa los detalles de tu nueva cita.'
-              : 'Actualiza los detalles de tu cita.'}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Confetti active={showConfetti} onComplete={() => setShowConfetti(false)} />
+      <Dialog open={open} onOpenChange={onClose}>
+        <DialogContent className="sm:max-w-[500px] animate-scale-in">
+          <DialogHeader>
+            <DialogTitle>
+              {mode === 'create' ? 'Crear nueva cita' : 'Editar cita'}
+            </DialogTitle>
+            <DialogDescription>
+              {mode === 'create'
+                ? 'Completa los detalles de tu nueva cita.'
+                : 'Actualiza los detalles de tu cita.'}
+            </DialogDescription>
+          </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Título */}
@@ -232,6 +278,63 @@ export function CitaForm({
             />
           </div>
 
+          {/* Notificación */}
+          <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Bell className="h-4 w-4 text-primary" />
+                <Label htmlFor="notificacion-activa" className="cursor-pointer">
+                  Activar recordatorio
+                </Label>
+              </div>
+              <Switch
+                id="notificacion-activa"
+                checked={formData.notificacion.activa}
+                onCheckedChange={(checked) => handleNotificationChange('activa', checked)}
+                disabled={isSubmitting}
+              />
+            </div>
+
+            {formData.notificacion.activa && (
+              <div className="space-y-3 pt-2">
+                {/* Tiempo de anticipación */}
+                <div className="space-y-2">
+                  <Label htmlFor="tiempo-anticipacion">Avisar con anticipación</Label>
+                  <Select
+                    value={formData.notificacion.tiempo_anticipacion?.toString() || '60'}
+                    onValueChange={(value) =>
+                      handleNotificationChange('tiempo_anticipacion', parseInt(value))
+                    }
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger id="tiempo-anticipacion">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="15">15 minutos antes</SelectItem>
+                      <SelectItem value="30">30 minutos antes</SelectItem>
+                      <SelectItem value="60">1 hora antes</SelectItem>
+                      <SelectItem value="120">2 horas antes</SelectItem>
+                      <SelectItem value="1440">1 día antes</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Mensaje personalizado */}
+                <div className="space-y-2">
+                  <Label htmlFor="notificacion-mensaje">Mensaje personalizado (opcional)</Label>
+                  <Input
+                    id="notificacion-mensaje"
+                    placeholder="Ej: No olvides llevar tus documentos"
+                    value={formData.notificacion.mensaje || ''}
+                    onChange={(e) => handleNotificationChange('mensaje', e.target.value)}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Submit error */}
           {errors.submit && (
             <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
@@ -260,5 +363,6 @@ export function CitaForm({
         </form>
       </DialogContent>
     </Dialog>
+    </>
   );
 }

@@ -1,0 +1,4 @@
+[ROUTE] texto='Test', run_text_agent=True
+[ROUTE] run_text_agent returned: {'action': 'test', 'mensaje': 'Comando de prueba', 'resultado': 'Sin resultado', 'query': 'Test'}
+[ROUTE] texto='Agendar dentista manana a las 10am', run_text_agent=True
+[ROUTE] run_text_agent returned: {'action': 'create', 'mensaje': 'Cita agendada para manana a las 10:00am', 'resultado': {'titulo': 'Dentista', 'fecha': '2025-11-18', 'hora_inicio': '10:00', 'lugar': '', 'descripcion': ''}}

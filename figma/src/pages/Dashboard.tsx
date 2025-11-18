@@ -171,7 +171,8 @@ export function Dashboard({ citas, onProcessCommand, onNavigate, userName }: Das
       const agentMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'agent',
-        content: response.respuesta || '¡Listo! He procesado tu solicitud.',
+        // Use agent response only; do not fall back to a hardcoded string.
+        content: response.respuesta,
         timestamp: new Date(),
         suggestions: getSuggestionsBasedOnContext(response),
       };

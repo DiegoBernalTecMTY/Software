@@ -19,7 +19,7 @@ const API_BASE_URL = 'http://localhost:5000';
 // Set to true: Use mock data (no backend needed - DEMO MODE)
 // Set to false: Connect to real backend at API_BASE_URL
 // ============================================================
-const USE_MOCK_DATA = true;
+const USE_MOCK_DATA = false;
 // ============================================================
 
 // Mock data storage (simulates a database)

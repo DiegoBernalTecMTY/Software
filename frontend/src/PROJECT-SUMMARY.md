@@ -27,10 +27,12 @@ El Agente inteligente para agendar citas personales es una aplicación web moder
 - **Delete:** Confirmation before removal
 
 ### 3. Natural Language Command Center
-- Conversational appointment creation
+- Conversational appointment creation (text and voice)
+- Voice-to-text input using Web Speech API
 - Suggested command templates
 - Preview and confirmation flow
 - Intelligent parsing (backend-powered)
+- Visual feedback for voice input state
 
 ### 4. Multiple Views
 - **Dashboard:** Overview with upcoming appointments

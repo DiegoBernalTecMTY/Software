@@ -9,6 +9,10 @@ A modern, accessible booking and appointments web application with natural langu
 - 🎯 **Intuitive Dashboard** - Overview of upcoming appointments with calendar integration
 - 📝 **CRUD Operations** - Create, read, update, and delete appointments
 - 🤖 **Natural Language Commands** - Create appointments using conversational language
+- 🎤 **Voice Input** - Dictate commands using speech-to-text (supported browsers)
+- 🧠 **Personalized AI Agent** - Teach the AI your scheduling preferences and rules for smarter suggestions
+- 🔔 **Smart Notifications** - Set reminders and custom messages for appointments
+- 🔒 **Secure Account Management** - Change password with strong validation requirements
 - 📱 **Fully Responsive** - Works seamlessly on desktop, tablet, and mobile
 - ♿ **Accessible** - WCAG AA compliant with keyboard navigation support
 - 🎨 **Modern Design** - Calm teal/blue color scheme with polished UI
@@ -23,19 +27,86 @@ A modern, accessible booking and appointments web application with natural langu
 
 ### Running the Application
 
-The application is pre-configured and ready to use. Simply:
+The application runs in **DEMO MODE** by default with mock data - no backend required!
 
-1. Ensure the Flask backend is running on port 5000
-2. The app will auto-connect to the API
-3. Start by registering a new account or logging in
+**Quick Start (Demo Mode):**
+1. Launch the application
+2. Log in with any email and password (e.g., demo@example.com / password123)
+3. Explore all features with simulated data
+
+**Connecting to Real Backend:**
+1. Open `/utils/api.ts`
+2. Set `USE_MOCK_DATA = false`
+3. Update `API_BASE_URL` to your backend endpoint
+4. Ensure the backend implements all API endpoints (see `api-examples.md`)
+
+📖 **For detailed information about Demo Mode, see [DEMO-MODE.md](./DEMO-MODE.md)**
 
 ### Demo Flow
 
 1. **Register:** Create a new account with name, email, and password
 2. **Dashboard:** View your appointments overview and calendar
-3. **Create Appointment:** Use the form or natural language command
-4. **Manage:** Edit, delete, or view appointment details
-5. **Settings:** Update your profile information
+3. **Create Appointment:** Use the form, natural language command, or voice input
+4. **Set Notifications:** Enable reminders with custom messages for any appointment
+5. **Notifications Panel:** View all appointments with active reminders on the right sidebar (desktop)
+6. **Manage:** Edit, delete, or view appointment details
+7. **Settings:** Update your profile, personalize the AI agent, change your password, and manage integrations
+
+### Using Voice Input
+
+The Command Center supports voice dictation:
+
+1. Click the microphone button (🎤) in the text area
+2. Allow microphone access when prompted by your browser
+3. Speak your command clearly in Spanish (e.g., "Agendar cita con el dentista mañana a las tres")
+4. The text will appear automatically as you speak
+5. Click "Procesar" to process the command
+
+**Requirements:**
+- Supported browsers: Chrome, Edge, Safari (limited support)
+- HTTPS connection required for security
+- Microphone access permission
+- Quiet environment recommended for best accuracy
+
+**Note:** Voice input currently uses browser-based speech recognition. For integration with an AI agent backend, see [VOICE-AI-INTEGRATION.md](./VOICE-AI-INTEGRATION.md)
+
+### Using Notifications
+
+Appointments can have optional notifications/reminders:
+
+- When creating or editing an appointment, toggle "Activar recordatorio"
+- Choose when to be notified (15 min, 30 min, 1 hour, 2 hours, or 1 day before)
+- Add a custom reminder message (optional)
+- Appointments with active notifications appear in the Notifications Panel on the dashboard (desktop view)
+- The panel shows upcoming notifications at the top and past ones below
+
+### Personalizing the AI Agent
+
+Teach the agent your scheduling habits and preferences:
+
+- Go to Settings > "Instrucciones para el Agente"
+- Add your personal rules, preferences, and scheduling constraints
+- Examples:
+  - Preferred time slots (e.g., "I prefer morning appointments between 9am-12pm")
+  - Recurring commitments (e.g., "Monday 10am is always blocked for team meetings")
+  - Buffer time requirements (e.g., "Need 15 minutes between consecutive appointments")
+  - Location preferences (e.g., "Medical appointments at Central Hospital")
+  - Default reminder times (e.g., "1 hour before medical appointments")
+  - Availability restrictions (e.g., "No appointments Friday afternoons")
+- The AI agent will use these instructions to provide more intelligent and personalized suggestions
+
+### Account Security
+
+Keep your account secure:
+
+- Go to Settings > "Cambiar contraseña"
+- Enter your current password
+- Create a new password that meets the requirements:
+  - Minimum 8 characters
+  - Include uppercase and lowercase letters
+  - Include numbers
+- Confirm your new password
+- Your password will be updated immediately
 
 ## 📁 Project Structure
 
@@ -48,6 +119,7 @@ The application is pre-configured and ready to use. Simply:
 │   ├── CitaForm.tsx            # Create/Edit form
 │   ├── CommandComposer.tsx     # Natural language interface
 │   ├── CompactCalendar.tsx     # Mini calendar
+│   ├── NotificationsPanel.tsx  # Notifications sidebar
 │   └── ui/                     # ShadCN UI components
 ├── pages/
 │   ├── Login.tsx               # Login screen

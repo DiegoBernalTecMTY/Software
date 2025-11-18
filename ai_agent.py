@@ -1,383 +1,202 @@
-"""AI agent abstraction for the app.
-
-Provides three entry points:
-- run_text_agent(text, user_context)
-- run_voice_agent(transcript, user_context)
-- create_plan_events(goal, window, preferences)
-
-This module prefers a LangChain + Groq integration via `langchain_groq.ChatGroq`.
-If available it creates an agent with tools that call the application's own
-HTTP API to create, query and delete `cita` records. When unavailable it
-falls back to LangChain `ChatOpenAI` or a direct OpenAI-compatible client.
-"""
-
-from __future__ import annotations
-
-import json
 import os
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+import requests
+import json
+from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 
-# Load .env if present
+import functools
+
+from langchain.agents import create_agent
+from langchain_core.prompts import PromptTemplate
+from langchain_core.tools import tool
+from langchain_groq import ChatGroq
+from langchain_community.chat_message_histories import ChatMessageHistory
+from langgraph.checkpoint.memory import InMemorySaver
+
+# Load environment variables from .env file
 load_dotenv()
 
-import requests
-
-# LangChain/Groq imports (optional)
-try:
-    from langchain_groq import ChatGroq
-    CHATGROQ_AVAILABLE = True
-except Exception:
-    CHATGROQ_AVAILABLE = False
-
-try:
-    from langchain.agents import create_agent
-    AGENT_FACTORY_AVAILABLE = True
-except Exception:
-    AGENT_FACTORY_AVAILABLE = False
-
-try:
-    from langchain.chat_models import ChatOpenAI
-    from langchain.prompts import PromptTemplate
-    from langchain.chains import LLMChain
-    LANGCHAIN_AVAILABLE = True
-except Exception:
-    LANGCHAIN_AVAILABLE = False
-
-try:
-    from openai import OpenAI
-    OPENAI_CLIENT_AVAILABLE = True
-except Exception:
-    OPENAI_CLIENT_AVAILABLE = False
-
-try:
-    from langchain.tools import tool as _lc_tool_decorator
-    HAVE_LC_TOOL = True
-except Exception:
-    _lc_tool_decorator = None
-    HAVE_LC_TOOL = False
-
-# Configuration
+# --- Configuration ---
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-LANGCHAIN_API_KEY = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("LANGSMITH_API_KEY")
-GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-DEFAULT_MODEL = os.environ.get("GROQ_TEXT_MODEL", "llama-3.3-70b-versatile")
+# Using a powerful model capable of function calling and reasoning
+DEFAULT_MODEL = os.environ.get("GROQ_TEXT_MODEL", "llama3-70b-8192")
+# Base URL for our local Flask API
+LOCAL_API_BASE = os.environ.get("LOCAL_API_BASE", "http://127.0.0.1:5000")
 
-# Base URL for our local Flask API; tools call these endpoints
-LOCAL_API_BASE = os.environ.get("LOCAL_API_BASE", "http://localhost:5000")
+# LangSmith Configuration (for tracing and debugging)
+# Ensure these are set in your .env file to enable tracing
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
+os.environ["LANGCHAIN_API_KEY"] = os.environ.get("LANGSMITH_API_KEY")
+os.environ["LANGCHAIN_PROJECT"] = os.environ.get("LANGSMITH_PROJECT")
 
+CURRENT_USER_TOKEN = None
+# --- Agent Tools ---
+# These are the functions the agent can decide to use.
+# They interact with our Flask backend.
 
-def _load_api_keys_from_file(path: Optional[str] = None) -> Dict[str, str]:
-    keys: Dict[str, str] = {}
-    if not path:
-        path = Path(__file__).resolve().parent.joinpath("API keys.txt")
-    p = Path(path)
-    if not p.exists():
-        return keys
+def create_tools(user_token: str):
+    """Create tools with user_token baked in"""
+    print(f"✅ Creating tools with user_token: {user_token}")  # Debug
+    @tool
+    def create_appointment(titulo: str, fecha: str, hora_inicio: str, lugar: str = "Por definir", descripcion: str = "") -> str:
+        """Create a new appointment for the user."""
+        return _create_appointment_impl(titulo, fecha, hora_inicio, lugar, descripcion, user_token)
+
+    @tool
+    def list_appointments(where_clause: str = None) -> str:
+        """List appointments for the user, optionally filtered by a where clause."""
+        return _list_appointments_impl(user_token, where_clause)
+
+    @tool
+    def update_appointment(object_id: str, updates: dict) -> str:
+        """Update an existing appointment identified by object_id with the provided updates."""
+        return _update_appointment_impl(object_id, updates, user_token)
+
+    @tool
+    def delete_appointment(object_id: str) -> str:
+        """Delete an existing appointment identified by object_id."""
+        return _delete_appointment_impl(object_id, user_token)
+
+    return [create_appointment, list_appointments, update_appointment, delete_appointment]
+
+# Implementation functions (the actual logic)
+def _create_appointment_impl(titulo: str, fecha: str, hora_inicio: str, lugar: str, descripcion: str, user_token: str) -> str:
+    """Crea una nueva cita. La fecha DEBE estar en formato YYYY-MM-DD. La hora_inicio DEBE estar en formato HH:MM (24-hour)."""
     try:
-        text = p.read_text(encoding="utf-8")
-    except Exception:
-        return keys
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            k, v = line.split("=", 1)
-        elif ":" in line:
-            k, v = line.split(":", 1)
+        headers = {'user-token': user_token, 'Content-Type': 'application/json'}
+        payload = {"titulo": titulo, "fecha": fecha, "hora_inicio": hora_inicio, "lugar": lugar, "descripcion": descripcion}
+        response = requests.post(f"{LOCAL_API_BASE}/data/citas", json=payload, headers=headers)
+        response.raise_for_status()
+        return f"Cita creada exitosamente. Detalles: {json.dumps(response.json())}"
+    except Exception as e:
+        return f"Error al crear la cita: {e}. Informa al usuario."
+
+def _list_appointments_impl(user_token: str, where_clause: str = None) -> str:
+    """Lista las citas del usuario. Puede filtrar con 'where_clause'. Ejemplo: "titulo LIKE '%dentista%'"""
+    try:
+        headers = {'user-token': user_token}
+        params = {'where': where_clause} if where_clause else None
+        response = requests.get(f"{LOCAL_API_BASE}/data/citas", params=params, headers=headers)
+        response.raise_for_status()
+        citas = response.json()
+        if not citas:
+            return "No se encontraron citas que coincidan con la búsqueda."
+        return f"Citas encontradas: {json.dumps(citas)}"
+    except Exception as e:
+        return f"Error al listar las citas: {e}. Informa al usuario."
+
+def _update_appointment_impl(object_id: str, updates: dict, user_token: str) -> str:
+    """Actualiza una cita existente por su object_id. 'updates' es un diccionario con los campos a cambiar."""
+    try:
+        headers = {'user-token': user_token, 'Content-Type': 'application/json'}
+        response = requests.put(f"{LOCAL_API_BASE}/data/citas/{object_id}", json=updates, headers=headers)
+        response.raise_for_status()
+        return f"Cita actualizada. Detalles: {json.dumps(response.json())}"
+    except Exception as e:
+        return f"Error al actualizar la cita: {e}. Verifica que el object_id sea correcto."
+
+def _delete_appointment_impl(object_id: str, user_token: str) -> str:
+    """Elimina una cita existente por su object_id."""
+    try:
+        headers = {'user-token': user_token}
+        response = requests.delete(f"{LOCAL_API_BASE}/data/citas/{object_id}", headers=headers)
+        response.raise_for_status()
+        return f"Cita con ID {object_id} eliminada exitosamente."
+    except Exception as e:
+        return f"Error al eliminar la cita: {e}. Verifica que el object_id sea correcto."
+
+
+
+# --- Agent Definition ---
+
+# In-memory store for session histories.
+# In a production environment, you would use a persistent store like Redis or a database.
+store = {}
+
+def get_session_history(session_id: str) -> ChatMessageHistory:
+    """Retrieves or creates a chat history for a given session ID."""
+    if session_id not in store:
+        store[session_id] = ChatMessageHistory()
+    return store[session_id]
+
+
+# The system prompt for the agent
+SYSTEM_PROMPT = """
+Eres un asistente virtual experto en la gestión de citas, y te comunicas exclusivamente en español.
+Tu objetivo es ayudar al usuario a crear, consultar, modificar y eliminar sus citas de manera eficiente y amigable.
+
+INSTRUCCIONES DE OPERACIÓN:
+1.  **Conversa Naturalmente**: Sé amable y conversacional.
+2.  **Usa las Herramientas**: Para cualquier acción relacionada con citas (crear, listar, etc.), DEBES usar una de las herramientas disponibles.
+3.  **Extrae Información**: Presta atención a los detalles en la conversación del usuario (título, fecha, hora, etc.) para usarlos como argumentos en las herramientas. La fecha actual se menciona al inicio de la entrada del usuario y te sirve de referencia para términos como "mañana" o "próximo martes".
+4.  **Pide Clarificación**: Si te falta información crucial para usar una herramienta (ej. el título para crear una cita), pide amablemente al usuario que la proporcione.
+5.  **Confirma Acciones**: Antes de realizar acciones destructivas como eliminar o modificar una cita, busca la cita primero con `list_appointments` para obtener su `object_id` y presenta la información al usuario para que confirme.
+6.  **Formato de Respuesta**: Responde usando el formato ReAct, que incluye tu pensamiento, la acción a tomar y la observación del resultado de la herramienta.
+
+Si al usar las herramientas encuentras errores, como que el usuario no especific'o un rango de fechas, llama de nuevo a la herramienta con un rango de fechas adecuado y corto e informa al usuario sobre el rango de dias que le est'as mostrando.
+"""
+
+    
+# Initialize the agent executor
+
+checkpointer = InMemorySaver()
+
+    
+# Initialize the agent executor
+class Agente_de_Citas:
+    def __init__(self, session_id: str = "default_session", user_token: str = None):
+        self.session_id = session_id  # ✅ Store session_id
+        self.user_token = user_token  # ✅ Store user_token
+        
+        llm = ChatGroq(model=DEFAULT_MODEL, temperature=0, groq_api_key=GROQ_API_KEY)
+        
+        tools = create_tools(user_token=self.user_token)
+
+        self.agent = create_agent(
+            model=llm,
+            tools=tools,
+            system_prompt=SYSTEM_PROMPT,
+            checkpointer=checkpointer
+        )
+
+    def invoke(self, text: str):
+        current_time = datetime.now().strftime("%A, %Y-%m-%d %H:%M:%S")
+        input_with_datetime = f"Fecha y hora actual: {current_time}\n\n{text}"
+        
+        result = self.agent.invoke(
+            {"messages": [{"role": "user", "content": input_with_datetime}]},
+            {"configurable": {"thread_id": self.session_id}},  # ✅ Now defined
+        )
+        
+        # Extract output
+        if hasattr(result, 'content'):
+            output = result.content
+        elif isinstance(result, dict) and 'messages' in result:
+            messages = result['messages']
+            if messages:
+                last_msg = messages[-1]
+                output = last_msg.content if hasattr(last_msg, 'content') else str(last_msg)
+            else:
+                output = "No response"
         else:
-            parts = line.split()
-            if len(parts) >= 2:
-                k, v = parts[0], " ".join(parts[1:])
-            else:
-                continue
-        keys[k.strip()] = v.strip()
-    return keys
+            output = str(result)
+        
+        return {"output": output, "session_id": self.session_id}
 
 
-def ensure_api_keys_loaded() -> None:
-    global GROQ_API_KEY, LANGCHAIN_API_KEY
-    if GROQ_API_KEY and LANGCHAIN_API_KEY:
-        return
-    file_keys = _load_api_keys_from_file()
-    if not GROQ_API_KEY:
-        GROQ_API_KEY = file_keys.get("GROQ_API_KEY") or file_keys.get("GROQ")
-        if GROQ_API_KEY:
-            os.environ.setdefault("GROQ_API_KEY", GROQ_API_KEY)
-            os.environ.setdefault("OPENAI_API_KEY", GROQ_API_KEY)
-    if not LANGCHAIN_API_KEY:
-        LANGCHAIN_API_KEY = file_keys.get("LANGCHAIN_API_KEY") or file_keys.get("LANGSMITH_API_KEY")
-        if LANGCHAIN_API_KEY:
-            os.environ.setdefault("LANGCHAIN_API_KEY", LANGCHAIN_API_KEY)
 
-
-def _ensure_openai_env() -> None:
-    if GROQ_API_KEY:
-        os.environ.setdefault("OPENAI_API_KEY", GROQ_API_KEY)
-    if GROQ_BASE_URL:
-        os.environ.setdefault("OPENAI_API_BASE", GROQ_BASE_URL)
-
-
-def _call_text_model_openai(prompt: str, model: Optional[str] = None) -> str:
-    if not OPENAI_CLIENT_AVAILABLE:
-        raise RuntimeError("OpenAI client not available")
-    client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL)
-    model_name = model or DEFAULT_MODEL
-    resp = client.responses.create(model=model_name, input=prompt)
-    try:
-        return resp.output_text
-    except Exception:
-        return json.dumps(resp, default=lambda o: getattr(o, '__dict__', str(o)), ensure_ascii=False)
-
-
-# System prompt for calendar agent
-SYSTEM_PROMPT = os.environ.get(
-    "GROQ_SYSTEM_PROMPT",
-    (
-        "Eres un asistente especializado en calendario y planificación. "
-        "Soportas: crear, reagendar, cancelar, consultar disponibilidad, crear eventos recurrentes, y generar planes bloqueantes. "
-        "Cuando se requiera una salida estructurada para acciones (por ejemplo: crear evento, modificar, buscar), responde con JSON puro. "
-        "Para planes devuelve una lista JSON de eventos con campos: titulo, fecha (YYYY-MM-DD), hora_inicio (HH:MM, 24h), duracion_minutos, descripcion, recurrence (opcional, en RRULE), reminders (opcional, lista de minutos antes), timezone. "
-        "Siempre solicita confirmación explícita antes de ejecutar cambios que modifiquen calendarios, a menos que el campo `execute:true` esté presente en la solicitud. "
-        "Devuelve las fechas siempre en ISO (YYYY-MM-DD) y horas en HH:MM. Usa la zona horaria del usuario si está disponible."
-    ),
-)
-
-
-# Build agent and attach tools that call our API
-AGENT: Optional[Any] = None
-if CHATGROQ_AVAILABLE and AGENT_FACTORY_AVAILABLE:
-    try:
-        ensure_api_keys_loaded()
-        _ensure_openai_env()
-        model = ChatGroq(model=os.environ.get("GROQ_TEXT_MODEL", DEFAULT_MODEL))
-
-        # Tool helpers
-        def _format_json_input(inp: str) -> Optional[Dict[str, Any]]:
-            try:
-                return json.loads(inp)
-            except Exception:
-                return None
-
-        def create_cita_tool(input_text: str) -> str:
-            # Accept either a raw JSON body string, or a wrapper {"body":..., "user_token":...}
-            parsed = _format_json_input(input_text)
-            token = None
-            if isinstance(parsed, dict):
-                if 'body' in parsed:
-                    payload = parsed.get('body')
-                    token = parsed.get('user_token') or parsed.get('user-token')
-                else:
-                    payload = parsed
-            else:
-                return "ERROR: create_cita expects a JSON body as input"
-
-            try:
-                url = LOCAL_API_BASE.rstrip('/') + '/data/Cita'
-                headers = {'Content-Type': 'application/json'}
-                if token:
-                    headers['user-token'] = token
-                r = requests.post(url, json=payload, headers=headers, timeout=10)
-                r.raise_for_status()
-                return json.dumps(r.json(), ensure_ascii=False)
-            except Exception as e:
-                return f"ERROR creating cita: {str(e)}"
-
-        def get_cita_tool(input_text: str) -> str:
-            # Allow either raw id string or JSON wrapper {"id": "...", "user_token": "..."}
-            parsed = _format_json_input(input_text)
-            token = None
-            if isinstance(parsed, dict):
-                cid = str(parsed.get('id') or parsed.get('cid') or parsed.get('target_id') or '').strip()
-                token = parsed.get('user_token') or parsed.get('user-token')
-            else:
-                cid = input_text.strip()
-
-            if not cid:
-                return "ERROR: get_cita expects an id as input"
-            try:
-                url = LOCAL_API_BASE.rstrip('/') + f'/data/Cita/{cid}'
-                headers = {}
-                if token:
-                    headers['user-token'] = token
-                r = requests.get(url, headers=headers or None, timeout=10)
-                r.raise_for_status()
-                return json.dumps(r.json(), ensure_ascii=False)
-            except Exception as e:
-                return f"ERROR getting cita: {str(e)}"
-
-        def delete_cita_tool(input_text: str) -> str:
-            parsed = _format_json_input(input_text)
-            token = None
-            if isinstance(parsed, dict):
-                cid = str(parsed.get('id') or parsed.get('cid') or parsed.get('target_id') or '').strip()
-                token = parsed.get('user_token') or parsed.get('user-token')
-            else:
-                cid = input_text.strip()
-
-            if not cid:
-                return "ERROR: delete_cita expects an id as input"
-            try:
-                url = LOCAL_API_BASE.rstrip('/') + f'/data/Cita/{cid}'
-                headers = {}
-                if token:
-                    headers['user-token'] = token
-                r = requests.delete(url, headers=headers or None, timeout=10)
-                r.raise_for_status()
-                return json.dumps({"status": "deleted", "id": cid}, ensure_ascii=False)
-            except Exception as e:
-                return f"ERROR deleting cita: {str(e)}"
-
-        def find_citas_tool(input_text: str) -> str:
-            # Accept either raw query string or JSON {"query": "...", "user_token": "..."}
-            parsed = _format_json_input(input_text)
-            token = None
-            if isinstance(parsed, dict):
-                q = str(parsed.get('query') or parsed.get('q') or '')
-                token = parsed.get('user_token') or parsed.get('user-token')
-            else:
-                q = input_text or ""
-
-            try:
-                url = LOCAL_API_BASE.rstrip('/') + '/data/Cita'
-                headers = {}
-                if token:
-                    headers['user-token'] = token
-                r = requests.get(url, headers=headers or None, timeout=10)
-                r.raise_for_status()
-                items = r.json() or []
-                qlow = q.lower()
-                candidates = [it for it in items if qlow in (str(it.get('titulo','')).lower() + ' ' + str(it.get('descripcion','')).lower())]
-                return json.dumps(candidates[:10], ensure_ascii=False)
-            except Exception as e:
-                return f"ERROR finding citas: {str(e)}"
-
-        # Wrap tools for LangChain
-        tools: List[Any] = []
-        if HAVE_LC_TOOL and _lc_tool_decorator is not None:
-            create_cita_wrapped = _lc_tool_decorator(name="create_cita", description="Create a new cita by providing a JSON body.")(create_cita_tool)
-            get_cita_wrapped = _lc_tool_decorator(name="get_cita", description="Get cita details by id.")(get_cita_tool)
-            delete_cita_wrapped = _lc_tool_decorator(name="delete_cita", description="Delete a cita by id.")(delete_cita_tool)
-            find_citas_wrapped = _lc_tool_decorator(name="find_citas", description="Find citas matching a query.")(find_citas_tool)
-            tools = [create_cita_wrapped, get_cita_wrapped, delete_cita_wrapped, find_citas_wrapped]
-        else:
-            # create_agent can often accept tuples (name, callable, description)
-            tools = [
-                ("create_cita", create_cita_tool, "Create a new cita by providing a JSON body."),
-                ("get_cita", get_cita_tool, "Get cita details by id."),
-                ("delete_cita", delete_cita_tool, "Delete a cita by id."),
-                ("find_citas", find_citas_tool, "Find citas matching a query."),
-            ]
-
-        AGENT = create_agent(model=model, tools=tools, system_prompt=SYSTEM_PROMPT)
-    except Exception:
-        AGENT = None
-
-
-def _invoke_agent_agent_style(user_text: str) -> str:
-    if not AGENT:
-        raise RuntimeError("LangChain ChatGroq agent not available")
-    resp = AGENT.invoke({"messages": [{"role": "user", "content": user_text}]})
-    if isinstance(resp, dict):
-        for key in ("output", "content", "text", "result"):
-            if key in resp:
-                return resp[key]
-        return json.dumps(resp, ensure_ascii=False)
-    return str(resp)
-
-
-def run_text_agent(text: str, user_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    if not text:
-        return {"action": "none", "mensaje": "Comando vacío", "resultado": None}
-    user_ctx = user_context or {}
-    prompt_template = (
-        "Convierte el comando del usuario en un único objeto JSON con campos: action, mensaje, resultado, updates, target_id, query, candidates, clarify_questions. "
-        "Devuelve fechas en YYYY-MM-DD y horas en HH:MM 24h.\n\nContexto: {context}\nComando: {command}"
-    )
-    raw = ""
-    # 1) Agent
-    if AGENT:
-        try:
-            raw = _invoke_agent_agent_style(text)
-        except Exception:
-            raw = ""
-    # 2) LangChain ChatOpenAI
-    if not raw and LANGCHAIN_AVAILABLE:
-        try:
-            ensure_api_keys_loaded()
-            _ensure_openai_env()
-            prompt = PromptTemplate(input_variables=["context", "command"], template=prompt_template)
-            llm = ChatOpenAI(model=DEFAULT_MODEL, temperature=0.0)
-            chain = LLMChain(llm=llm, prompt=prompt)
-            raw = chain.run({"context": json.dumps(user_ctx, ensure_ascii=False), "command": text})
-        except Exception:
-            raw = ""
-    # 3) OpenAI client fallback
-    if not raw and OPENAI_CLIENT_AVAILABLE:
-        try:
-            ensure_api_keys_loaded()
-            _ensure_openai_env()
-            raw = _call_text_model_openai(prompt_template.format(context=json.dumps(user_ctx), command=text))
-        except Exception as e:
-            raw = str(e)
-    start = raw.find("{")
-    if start != -1:
-        try:
-            obj = json.loads(raw[start:])
-            return obj
-        except Exception:
-            pass
-    return {"action": "none", "mensaje": f"No se pudo interpretar el comando. Respuesta del modelo: {raw}", "resultado": None}
-
-
-def run_voice_agent(transcript: str, user_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    return run_text_agent(transcript, user_context=user_context)
-
-
-def create_plan_events(goal: str, window: Optional[Dict[str, Any]] = None, preferences: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    prompt = (
-        "Eres un planificador que genera un plan bloqueante: devuelve un array JSON de eventos con campos: titulo, fecha (YYYY-MM-DD), hora_inicio (HH:MM), duracion_minutos, descripcion, recurrence (opcional RRULE), reminders (opcional, minutos), timezone. "
-        f"Objetivo: {goal}\nVentana: {json.dumps(window or {})}\nPreferencias: {json.dumps(preferences or {})}"
-    )
-    raw = ""
-    if AGENT:
-        try:
-            raw = _invoke_agent_agent_style(prompt)
-        except Exception:
-            raw = ""
-    if not raw and LANGCHAIN_AVAILABLE:
-        try:
-            ensure_api_keys_loaded()
-            _ensure_openai_env()
-            prompt_obj = PromptTemplate(input_variables=["body"], template="{body}")
-            llm = ChatOpenAI(model=DEFAULT_MODEL, temperature=0.0)
-            chain = LLMChain(llm=llm, prompt=prompt_obj)
-            raw = chain.run({"body": prompt})
-        except Exception:
-            raw = ""
-    if not raw and OPENAI_CLIENT_AVAILABLE:
-        raw = _call_text_model_openai(prompt)
-    start = raw.find("[")
-    if start != -1:
-        try:
-            arr = json.loads(raw[start:])
-            if isinstance(arr, list):
-                return arr
-        except Exception:
-            pass
-    return [{
-        "titulo": f"Tarea inicial: {goal}",
-        "fecha": window.get("start") if window and window.get("start") else "2025-11-17",
-        "hora_inicio": "09:00",
-        "duracion_minutos": 120,
-        "descripcion": "Bloque inicial para comenzar el plan"
-    }]
-
-
-if __name__ == "__main__":
-    ensure_api_keys_loaded()
-    print(run_text_agent("Agendar una cita con el dentista mañana a las 10am", {}))
-
+# Example of how to use it for testing
+if __name__ == '__main__':
+    print("Asistente de citas iniciado. Escribe 'salir' para terminar.")
+    
+    # Use a unique session ID for this test run
+    test_session_id = "test-run-123"
+    
+    while True:
+        user_input = input("Tú: ")
+        if user_input.lower() == 'salir':
+            break
+        
+        response = run_text_agent(user_input, session_id=test_session_id)
+        print(f"Asistente: {response['output']}")

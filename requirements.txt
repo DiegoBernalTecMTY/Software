@@ -3,10 +3,11 @@ requests>=2.28,<3
 flask-cors>=3.0.10
 # AI and provider libraries
 langchain==1.0.7
+langchain-core
+langchain-community
+langchain-groq
 openai==2.8.0
 python-dotenv>=1.0.0
-# Groq LangChain connector (provides `langchain_groq` / ChatGroq)
-langchain_groq
 
 # Google Calendar / OAuth
 google-api-python-client==2.187.0

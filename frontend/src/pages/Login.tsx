@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Calendar, LogIn, ArrowLeft } from 'lucide-react';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Label } from '../components/ui/label';
 import { Alert, AlertDescription } from '../components/ui/alert';
+import { Calendar, Mail, Lock, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 
 interface LoginProps {
   onLogin: (email: string, password: string) => Promise<void>;
@@ -13,10 +12,8 @@ interface LoginProps {
 }
 
 export function Login({ onLogin, onNavigateToRegister, onNavigateBack }: LoginProps) {
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-  });
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -24,7 +21,7 @@ export function Login({ onLogin, onNavigateToRegister, onNavigateBack }: LoginPr
     e.preventDefault();
     setError(null);
 
-    if (!formData.email || !formData.password) {
+    if (!email || !password) {
       setError('Por favor, completa todos los campos');
       return;
     }
@@ -32,18 +29,12 @@ export function Login({ onLogin, onNavigateToRegister, onNavigateBack }: LoginPr
     setIsSubmitting(true);
 
     try {
-      await onLogin(formData.email, formData.password);
+      await onLogin(email, password);
     } catch (err: any) {
       setError(err.message || 'Error al iniciar sesión. Verifica tus credenciales.');
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    setError(null);
   };
 
   return (
@@ -81,49 +72,59 @@ export function Login({ onLogin, onNavigateToRegister, onNavigateBack }: LoginPr
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Correo electrónico</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="tu@email.com"
-                  value={formData.email}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  autoComplete="email"
-                />
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    id="email"
+                    name="email"
+                    type="text"
+                    placeholder="tu@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={isSubmitting}
+                    autoComplete="off"
+                    className="flex h-10 w-full rounded-md border border-input bg-input-background pl-10 pr-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-900"
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="password">Contraseña</Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder=""
-                  value={formData.password}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  autoComplete="current-password"
-                />
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={isSubmitting}
+                    autoComplete="off"
+                    className="flex h-10 w-full rounded-md border border-input bg-input-background pl-10 pr-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-900"
+                  />
+                </div>
               </div>
 
               {error && (
                 <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
 
               <Button type="submit" className="w-full" disabled={isSubmitting}>
-                <LogIn className="mr-2 h-4 w-4" />
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {isSubmitting ? 'Iniciando sesión...' : 'Iniciar sesión'}
               </Button>
             </form>
 
             <div className="mt-6 text-center text-sm">
-              <span className="text-muted-foreground">¿No tienes cuenta? </span>
+              <span className="text-muted-foreground">¿No tienes una cuenta? </span>
               <button
                 onClick={onNavigateToRegister}
-                className="font-medium text-primary hover:underline"
+                className="font-medium text-primary transition-colors hover:text-primary/80"
+                disabled={isSubmitting}
               >
                 Regístrate aquí
               </button>

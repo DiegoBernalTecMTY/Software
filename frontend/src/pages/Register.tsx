@@ -70,13 +70,19 @@ export function Register({ onRegister, onNavigateToLogin, onNavigateBack }: Regi
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const fieldName = e.target.name;
+    const fieldValue = e.target.value;
+    
+    setFormData((prev) => ({ 
+      ...prev, 
+      [fieldName]: fieldValue 
+    }));
+    
     // Clear error for this field
-    if (errors[name]) {
+    if (errors[fieldName]) {
       setErrors((prev) => {
         const newErrors = { ...prev };
-        delete newErrors[name];
+        delete newErrors[fieldName];
         return newErrors;
       });
     }

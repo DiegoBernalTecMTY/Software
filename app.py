@@ -1,608 +1,421 @@
-
 from flask import Flask, request, jsonify, make_response
-try:
-    # optional dependency: flask-cors
-    from flask_cors import CORS
-except Exception:
-    CORS = None
+from flask_cors import CORS
 import requests
 import os
 import json
-import re
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
+from dotenv import load_dotenv
+from ai_agent import Agente_de_Citas
 
-# AI helper (Gemini / LangChain scaffold)
-try:
-    from ai import process_command as ai_process_command
-except Exception:
-    ai_process_command = None
+# Load environment variables from .env file
+load_dotenv()
 
-# New agent abstraction (LangChain / Groq)
-try:
-    from ai_agent import run_text_agent, run_voice_agent, create_plan_events
-except Exception:
-    run_text_agent = None
-    run_voice_agent = None
-    create_plan_events = None
+
 
 app = Flask(__name__)
+# Explicit CORS configuration: allow frontend origins, common headers, and credentials.
+from flask_cors import CORS
 
-# Lightweight CORS handling (works even if flask-cors is not installed)
-if CORS is not None:
-    CORS(app)
+# Allow all origins in development, but ensure the frontend can send `user-token` and Content-Type.
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True, allow_headers=["Content-Type", "Authorization", "user-token"], expose_headers=["user-token"]) 
 
-
-@app.before_request
-def handle_options_preflight():
-    # Respond to OPTIONS requests for CORS preflight quickly
-    if request.method == 'OPTIONS':
-        resp = make_response()
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        resp.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
-        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, user-token, application-id, secret-key'
-        return resp
-
-
-@app.after_request
-def set_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, user-token, application-id, secret-key'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
-    return response
-
-# --- Configuración de Backendless ---
-# Prefer using environment variables for credentials in development/CI.
-# These values fall back to the existing hard-coded values for convenience.
-BACKENDLESS_APP_ID = os.environ.get('BACKENDLESS_APP_ID', 'E60A01B9-D08F-4932-915E-F479323571A3')
-BACKENDLESS_REST_API_KEY = os.environ.get('BACKENDLESS_REST_API_KEY', '222DE0E2-363D-468A-A5B3-0556E6A62310')
+# --- Backendless Configuration ---
+BACKENDLESS_APP_ID = os.environ.get('BACKENDLESS_APP_ID')
+BACKENDLESS_REST_API_KEY = os.environ.get('BACKENDLESS_REST_API_KEY')
 BACKENDLESS_BASE_URL = f"https://api.backendless.com/{BACKENDLESS_APP_ID}/{BACKENDLESS_REST_API_KEY}"
+BACKENDLESS_USERS_URL = f"{BACKENDLESS_BASE_URL}/users"
 
 HEADERS = {
     "Content-Type": "application/json",
-    "application-id": BACKENDLESS_APP_ID,
-    "secret-key": BACKENDLESS_REST_API_KEY,
-    "api-version": "1.0"
 }
 
-# Convenience URLs for Backendless endpoints we need
-BACKENDLESS_USERS_URL = f"{BACKENDLESS_BASE_URL}/users"
-BACKENDLESS_USUARIOS_TABLE = f"{BACKENDLESS_BASE_URL}/data/usuarios"
-# Note: your Backendless tables are named `usuarios` and `citas` in the Console.
-# Use the exact table name (`citas`) for the Cita table.
-BACKENDLESS_CITA_TABLE = f"{BACKENDLESS_BASE_URL}/data/citas"
-
-
-def _search_citas_by_query(query: str, limit: int = 10):
-    """Try to find candidate citas that match a natural-language query.
-
-    This is a simple heuristic: build a `where` clause searching the `titulo`
-    and `descripcion` fields for keywords extracted from the query. Returns a
-    list of candidate dicts with keys: id (objectId), titulo, fecha, hora_inicio, snippet.
+# --- NEW: Secure User ID Retriever ---
+@app.route('/users/me', methods=['GET'])
+def get_user_id_from_token(user_token: str) -> str | None:
     """
-    if not query:
-        return []
-    # crude keyword extraction: remove small stopwords and take top keywords
-    kws = [w for w in re.findall(r"[\wáéíóúñÑ]+", query.lower()) if len(w) > 2]
-    stop = {'con', 'el', 'la', 'los', 'las', 'a', 'en', 'de', 'del', 'para', 'por', 'que', 'este', 'esta', 'próximo', 'próxima', 'siguiente', 'un', 'una'}
-    kws = [k for k in kws if k not in stop]
-    if not kws:
-        return []
-    clauses = []
-    for k in kws[:5]:
-        clauses.append(f"titulo LIKE '%{k}%'")
-        clauses.append(f"descripcion LIKE '%{k}%'")
-    where = ' OR '.join(clauses)
+    Validate a `user-token` and retrieve the Backendless `objectId`.
+
+    Strategy:
+    - If the token was issued via our proxied `/users/login`, we store a
+      mapping in `_TOKEN_TO_USER` and can return the objectId directly.
+    - Otherwise, we attempt to call Backendless (best-effort). Note: some
+      Backendless REST endpoints treat `/users/me` as an entity id and will
+      return 404 ("Entity with ID me not found"). In that case this function
+      will log the failure and return None.
+    """
+    user_token = request.headers.get('user-token')
+    if not user_token:
+        return None
+
+    # 1) Fast path: check mappings for tokens we issued via /users/login
+    mapped = _TOKEN_TO_USER.get(user_token)
+    if mapped:
+        return mapped
+
+    # 2) Fallback: try to query Backendless for the current user (may return 404)
     try:
-        r = requests.get(BACKENDLESS_CITA_TABLE, headers=HEADERS, params={'where': where, 'pageSize': limit}, timeout=10)
-        r.raise_for_status()
-        found = r.json() or []
-        candidates = []
-        for rec in found:
-            candidates.append({
-                'id': rec.get('objectId') or rec.get('id'),
-                'titulo': rec.get('titulo'),
-                'fecha': rec.get('fecha'),
-                'hora_inicio': rec.get('hora_inicio'),
-                'snippet': f"{rec.get('titulo','')} - {rec.get('fecha','')} {rec.get('hora_inicio','')}",
-            })
-        return candidates
-    except Exception:
-        return []
-
-# --- Servicios CRUD ---
-
-
-@app.route('/users/register', methods=['POST'])
-def users_register():
-    """Proxy endpoint to register a user in Backendless Users service."""
-    data = request.json
-    try:
-        url = f"{BACKENDLESS_USERS_URL}/register"
-        print(f"[DEBUG] POST to Backendless URL: {url}")
-        response = requests.post(url, json=data, headers=HEADERS)
+        headers = {'user-token': user_token}
+        url = f"{BACKENDLESS_USERS_URL}/me"
+        print(f"[AUTH_DEBUG] GET {url} headers={headers}")
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
-        created_user = response.json()
-
-        # Create a corresponding record in the `usuarios` data table so the
-        # frontend / admin can see application-level profiles. We store the
-        # Backendless user objectId in `backendlessUserId` for linkage.
+        user_data = response.json()
+        return user_data.get('objectId')
+    except requests.exceptions.RequestException as e:
+        msg = f"[AUTH_ERROR] Failed to validate token and get user ID: {e}"
         try:
-            usuario_payload = {
-                "email": created_user.get('email'),
-                "nombre": created_user.get('nombre'),
-                "backendlessUserId": created_user.get('objectId')
-            }
-            # best-effort: don't fail registration if this auxiliary write fails
-            requests.post(BACKENDLESS_USUARIOS_TABLE, json=usuario_payload, headers=HEADERS, timeout=10)
+            resp = getattr(e, 'response', None)
+            if resp is not None:
+                msg += f" | status={resp.status_code} | body={resp.text}"
         except Exception:
-            print('[WARN] creating usuarios record failed (non-fatal)')
+            pass
+        print(msg)
+        return None
 
-        return jsonify(created_user), response.status_code
+def _mask(s: str) -> str:
+    if not s:
+        return None
+    s = str(s)
+    if len(s) <= 6:
+        return '****'
+    return s[:3] + '...' + s[-3:]
+
+
+@app.route('/debug/urls', methods=['GET'])
+def debug_urls():
+    """Return masked Backendless URL and indicate whether env vars loaded."""
+    return jsonify({
+        'backendless_base_url': BACKENDLESS_BASE_URL,
+        'backendless_app_id': _mask(BACKENDLESS_APP_ID),
+        'backendless_rest_api_key': _mask(BACKENDLESS_REST_API_KEY),
+    }), 200
+
+
+@app.route('/debug/env', methods=['GET'])
+def debug_env():
+    """Report presence of important env vars (without revealing secrets)."""
+    return jsonify({
+        'has_groq_api_key': bool(os.environ.get('GROQ_API_KEY')),
+        'has_backendless_app_id': bool(BACKENDLESS_APP_ID),
+        'has_backendless_rest_api_key': bool(BACKENDLESS_REST_API_KEY),
+    }), 200
+
+# Backendless API endpoints
+# Use the canonical table path that matches the Backendless table name used
+# by the frontend (`/data/Cita`). This ensures consistent behavior
+# regardless of calling `/data/citas` or `/data/Cita` on our proxy.
+BACKENDLESS_CITA_TABLE_URL = f"{BACKENDLESS_BASE_URL}/data/citas"
+
+# Simple in-memory map for tokens obtained via this proxy: user-token -> objectId
+# This permits the server to validate tokens that were issued through our
+# proxied `/users/login` endpoint without relying on a `/users/me` REST route
+# which Backendless may not support (it treats 'me' as an entity id).
+_TOKEN_TO_USER: dict = {}
+
+# --- Helper to map agent response to frontend format ---
+def _map_agent_response_to_frontend(agent_response: dict) -> dict:
+    """
+    Maps the output from the new agent to the CommandResponse shape
+    the frontend expects: { exito, respuesta, mensaje, resultado }.
+    """
+    if not isinstance(agent_response, dict):
+        return {'exito': False, 'respuesta': str(agent_response), 'mensaje': 'Error inesperado del agente.', 'resultado': None}
+
+    # The agent's direct output is the "respuesta"
+    respuesta = agent_response.get('output', 'No se pudo procesar el comando.')
+    
+    # Check if the agent's output contains structured data from a tool
+    # LangChain agents often return stringified JSON from tools.
+    tool_result_str = agent_response.get('tool_result')
+    resultado = None
+    if tool_result_str:
+        try:
+            # Try to parse it as JSON
+            resultado = json.loads(tool_result_str)
+        except (json.JSONDecodeError, TypeError):
+            # If not JSON, just pass the raw string
+            resultado = tool_result_str
+
+    return {
+        'exito': True,  # Assume success if the agent provided a response
+        'respuesta': respuesta,
+        'mensaje': respuesta, # Use the same for mensaje for simplicity
+        'resultado': resultado,
+        'raw': agent_response, # Keep the raw agent output for debugging
+    }
+
+# --- Citas (Appointments) CRUD API Endpoints ---
+# These endpoints are called by the tools in ai_agent.py
+
+@app.route('/data/citas', methods=['POST'])
+@app.route('/data/Cita', methods=['POST'])
+def create_cita():
+    user_token = request.headers.get('user-token')
+    if not get_user_id_from_token(user_token): # Validate token before creating
+        return jsonify({"error": "Invalid or expired token."}), 401
+
+    try:
+        # Forward the token so Backendless can automatically set the ownerId
+        headers = {'user-token': user_token, 'Content-Type': 'application/json'}
+        response = requests.post(BACKENDLESS_CITA_TABLE_URL, json=request.json, headers=headers)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
     except requests.exceptions.RequestException as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/data/citas', methods=['GET'])
+@app.route('/data/Cita', methods=['GET'])
+def get_citas():
+    user_token = request.headers.get('user-token')
+    user_object_id = get_user_id_from_token(user_token)
+
+    if not user_object_id:
+        # If token validation failed, attempt a best-effort extraction of the
+        # ownerId from the incoming `where` query parameter. The frontend
+        # often includes `where=ownerId = '<objectId>'` when fetching citas.
+        # This is a development convenience only — in production require
+        # proper token validation or a secure introspection endpoint.
+        agent_where_clause = request.args.get('where')
+        extracted_owner = None
+        if agent_where_clause:
+            import re
+            m = re.search(r"ownerId\s*=\s*'([0-9A-Fa-f-]{36})'", agent_where_clause)
+            if m:
+                extracted_owner = m.group(1)
+                print(f"[AUTH_WARN] Token validation failed; extracted ownerId from query: {extracted_owner}")
+                user_object_id = extracted_owner
+        if not user_object_id:
+            return jsonify({"error": "Invalid or expired token. Please log in again."}), 401
+
+    # SECURE FILTER INJECTION
+    owner_filter = f"ownerId = '{user_object_id}'"
+    agent_where_clause = request.args.get('where')
+
+    if agent_where_clause:
+        # Combine the mandatory owner filter with the agent's query
+        final_where = f"{owner_filter} AND ({agent_where_clause})"
+    else:
+        final_where = owner_filter
+
+    try:
+        params = {'where': final_where}
+        # Forward the user's token when calling Backendless. Some Backendless
+        # setups expect the token even when filtering by ownerId, and it
+        # improves consistency with other endpoints.
+        headers = {'Content-Type': 'application/json'}
+        if user_token:
+            headers['user-token'] = user_token
+
+        print(f"[DEBUG] Fetching citas from Backendless: url={BACKENDLESS_CITA_TABLE_URL} params={params} headers={dict(headers)}")
+        response = requests.get(BACKENDLESS_CITA_TABLE_URL, params=params, headers=headers)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        # Provide detailed backend response info for debugging
+        msg = str(e)
+        try:
+            resp = getattr(e, 'response', None)
+            if resp is not None:
+                msg = f"Upstream status={resp.status_code} body={resp.text}"
+        except Exception:
+            pass
+        print(f"[ERROR] Error fetching citas: {msg}")
+        return jsonify({"error": msg}), 500
+        
+@app.route('/data/citas/<string:object_id>', methods=['GET'])
+@app.route('/data/Cita/<string:object_id>', methods=['GET'])
+def get_cita_by_id(object_id):
+    try:
+        url = f"{BACKENDLESS_CITA_TABLE_URL}/{object_id}"
+        response = requests.get(url, headers=HEADERS)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": str(e), "message": "Failed to retrieve appointment from Backendless"}), 500
+
+@app.route('/data/citas/<string:object_id>', methods=['PUT'])
+@app.route('/data/Cita/<string:object_id>', methods=['PUT'])
+def update_cita(object_id):
+    user_token = request.headers.get('user-token')
+    if not get_user_id_from_token(user_token):
+        return jsonify({"error": "Invalid or expired token."}), 401
+
+    try:
+        headers = {'user-token': user_token, 'Content-Type': 'application/json'}
+        url = f"{BACKENDLESS_CITA_TABLE_URL}/{object_id}"
+        response = requests.put(url, json=request.json, headers=headers)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        # If the user doesn't own the object, Backendless will return a 403/404, caught here.
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/data/citas/<string:object_id>', methods=['DELETE'])
+@app.route('/data/Cita/<string:object_id>', methods=['DELETE'])
+def delete_cita(object_id):
+    user_token = request.headers.get('user-token')
+    if not get_user_id_from_token(user_token):
+        return jsonify({"error": "Invalid or expired token."}), 401
+
+    try:
+        headers = {'user-token': user_token}
+        url = f"{BACKENDLESS_CITA_TABLE_URL}/{object_id}"
+        response = requests.delete(url, headers=headers)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- Users / Auth proxy endpoints (Backendless) ---
 
 
 @app.route('/users/login', methods=['POST'])
 def users_login():
-    """Proxy endpoint to login a user via Backendless Users service."""
     data = request.json
     try:
-        url = f"{BACKENDLESS_USERS_URL}/login"
-        print(f"[DEBUG] POST to Backendless URL: {url}")
+        url = f"{BACKENDLESS_BASE_URL}/users/login"
         response = requests.post(url, json=data, headers=HEADERS)
         response.raise_for_status()
-        # Backendless may return token in JSON or headers; return whatever it sends
-        try:
-            body = response.json()
-        except Exception:
-            body = {'message': response.text}
-        # If token present in headers, include it in the JSON for the frontend convenience
-        token = response.headers.get('user-token') or response.headers.get('user-token'.lower())
-        if token and isinstance(body, dict) and 'user-token' not in body:
-            body['user-token'] = token
-        # After successful login, ensure a `usuarios` record exists for this
-        # Backendless user (upsert by backendlessUserId). This keeps the
-        # application `usuarios` table in sync with the Users service.
-        try:
-            if isinstance(body, dict) and body.get('objectId'):
-                backendless_id = body.get('objectId')
-                # Query for existing profile by backendlessUserId
-                q = f"backendlessUserId = '{backendless_id}'"
-                # Use params so requests encodes the where clause correctly
-                r = requests.get(BACKENDLESS_USUARIOS_TABLE, headers=HEADERS, params={'where': q}, timeout=10)
-                if r.ok:
-                    found = r.json()
-                    if found:
-                        # update existing profile with latest email/nombre
-                        obj_id = found[0]['objectId']
-                        update_url = f"{BACKENDLESS_USUARIOS_TABLE}/{obj_id}"
-                        requests.put(update_url, json={
-                            'email': body.get('email'),
-                            'nombre': body.get('nombre'),
-                            'backendlessUserId': backendless_id
-                        }, headers=HEADERS, timeout=10)
-                    else:
-                        # create a new usuarios record
-                        requests.post(BACKENDLESS_USUARIOS_TABLE, json={
-                            'email': body.get('email'),
-                            'nombre': body.get('nombre'),
-                            'backendlessUserId': backendless_id
-                        }, headers=HEADERS, timeout=10)
-        except Exception:
-            print('[WARN] sync to usuarios table failed (non-fatal)')
-
-        return jsonify(body), response.status_code
+        resp_json = response.json()
+        # Store token->user mapping for tokens issued through this proxy
+        token = resp_json.get('user-token') or resp_json.get('userToken')
+        object_id = resp_json.get('objectId')
+        if token and object_id:
+            _TOKEN_TO_USER[token] = object_id
+            print(f"[AUTH_DEBUG] Stored token->user mapping for objectId={object_id}")
+        # If we didn't store a mapping, log the full response to aid debugging
+        if not (token and object_id):
+            print(f"[AUTH_DEBUG] Login response without token/objectId mapping: {resp_json}")
+        return jsonify(resp_json), response.status_code
     except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "message": "Failed to login with Backendless"}), 500
+
+
+@app.route('/users/register', methods=['POST'])
+def users_register():
+    data = request.json
+    try:
+        url = f"{BACKENDLESS_BASE_URL}/users/register"
+        response = requests.post(url, json=data, headers=HEADERS)
+        response.raise_for_status()
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": str(e), "message": "Failed to register user with Backendless"}), 500
 
 
 @app.route('/users/logout', methods=['GET'])
 def users_logout():
-    """Proxy endpoint to logout the current user. Requires user-token header."""
+    # Forward logout call to Backendless; include user-token header if provided
     token = request.headers.get('user-token')
     headers = dict(HEADERS)
     if token:
         headers['user-token'] = token
     try:
-        url = f"{BACKENDLESS_USERS_URL}/logout"
-        print(f"[DEBUG] GET to Backendless URL: {url}")
+        url = f"{BACKENDLESS_BASE_URL}/users/logout"
         response = requests.get(url, headers=headers)
         response.raise_for_status()
-        return jsonify({"message": "Logged out"}), response.status_code
+        # Remove mapping for this token if present
+        if token and token in _TOKEN_TO_USER:
+            _TOKEN_TO_USER.pop(token, None)
+            print(f"[AUTH_DEBUG] Removed token->user mapping for token")
+        return jsonify(response.json() if response.content else {}), response.status_code
     except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "message": "Failed to logout with Backendless"}), 500
 
 
-@app.route('/debug/urls', methods=['GET'])
-def debug_urls():
-    # Return computed Backendless URLs (safe to share) to help debugging
-    return jsonify({
-        'BACKENDLESS_BASE_URL': BACKENDLESS_BASE_URL,
-        'BACKENDLESS_USERS_URL': BACKENDLESS_USERS_URL,
-        'BACKENDLESS_USUARIOS_TABLE': BACKENDLESS_USUARIOS_TABLE,
-        'BACKENDLESS_CITA_TABLE': BACKENDLESS_CITA_TABLE,
-    })
-
-
-@app.route('/usuarios', methods=['POST'])
-def create_usuario():
-    """
-    Crea un nuevo usuario.
-    Ejemplo de request body:
-    {
-        "id": 1,
-        "first_name": "Juan",
-        "last_name": "Pérez",
-        "email": "juan.perez@example.com",
-        "gender": "Male",
-        "ip_address": "192.168.1.1"
-    }
-    """
+@app.route('/users/<string:user_id>', methods=['PUT'])
+def update_user(user_id):
     data = request.json
+    token = request.headers.get('user-token')
+    headers = dict(HEADERS)
+    if token:
+        headers['user-token'] = token
     try:
-        response = requests.post(BACKENDLESS_USUARIOS_TABLE, json=data, headers=HEADERS)
-        response.raise_for_status()  # Lanza una excepción para códigos de estado de error
-        return jsonify(response.json()), response.status_code
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/usuarios', methods=['GET'])
-def get_all_usuarios():
-    """
-    Obtiene todos los usuarios.
-    """
-    try:
-        response = requests.get(BACKENDLESS_USUARIOS_TABLE, headers=HEADERS)
+        url = f"{BACKENDLESS_BASE_URL}/users/{user_id}"
+        response = requests.put(url, json=data, headers=headers)
         response.raise_for_status()
         return jsonify(response.json()), response.status_code
     except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "message": "Failed to update user in Backendless"}), 500
 
-@app.route('/usuarios/<int:id>', methods=['GET'])
-def get_usuario_by_id(id):
-    """
-    Obtiene un usuario por su ID.
-    Backendless utiliza un campo 'objectId' para identificar registros.
-    Necesitamos hacer una consulta para encontrar el usuario con el 'id' proporcionado.
-    """
-    where_clause = f"id = {id}"
-    try:
-        # Use params to ensure proper encoding of the where clause
-        response = requests.get(BACKENDLESS_USUARIOS_TABLE, headers=HEADERS, params={'where': where_clause})
-        response.raise_for_status()
-        usuarios = response.json()
-        if usuarios:
-            return jsonify(usuarios[0]), 200
-        else:
-            return jsonify({"message": f"Usuario con ID {id} no encontrado"}), 404
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
 
-@app.route('/usuarios/<int:id>', methods=['PUT'])
-def update_usuario(id):
-    """
-    Actualiza un usuario existente por su ID.
-    Backendless requiere el 'objectId' para actualizaciones.
-    Primero buscamos el usuario por el 'id' de la tabla, luego actualizamos usando el 'objectId'.
-    Ejemplo de request body:
-    {
-        "first_name": "Juan Carlos",
-        "email": "juan.carlos@example.com"
-    }
-    """
+@app.route('/users/<string:user_id>/password', methods=['PUT'])
+def change_user_password(user_id):
     data = request.json
-    where_clause = f"id = {id}"
+    token = request.headers.get('user-token')
+    headers = dict(HEADERS)
+    if token:
+        headers['user-token'] = token
     try:
-        # 1. Encontrar el objectId del usuario por su 'id' de tabla
-        response_find = requests.get(BACKENDLESS_USUARIOS_TABLE, headers=HEADERS, params={'where': where_clause})
-        response_find.raise_for_status()
-        usuarios = response_find.json()
-
-        if not usuarios:
-            return jsonify({"message": f"Usuario con ID {id} no encontrado"}), 404
-
-        backendless_object_id = usuarios[0]['objectId']
-        update_url = f"{BACKENDLESS_USUARIOS_TABLE}/{backendless_object_id}"
-
-        # 2. Realizar la actualización
-        response_update = requests.put(update_url, json=data, headers=HEADERS)
-        response_update.raise_for_status()
-        return jsonify(response_update.json()), response_update.status_code
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/usuarios/<int:id>', methods=['DELETE'])
-def delete_usuario(id):
-    """
-    Elimina un usuario por su ID.
-    Backendless requiere el 'objectId' para eliminaciones.
-    Primero buscamos el usuario por el 'id' de la tabla, luego eliminamos usando el 'objectId'.
-    """
-    where_clause = f"id = {id}"
-    try:
-        # 1. Encontrar el objectId del usuario por su 'id' de tabla
-        response_find = requests.get(BACKENDLESS_USUARIOS_TABLE, headers=HEADERS, params={'where': where_clause})
-        response_find.raise_for_status()
-        usuarios = response_find.json()
-
-        if not usuarios:
-            return jsonify({"message": f"Usuario con ID {id} no encontrado"}), 404
-
-        backendless_object_id = usuarios[0]['objectId']
-        delete_url = f"{BACKENDLESS_USUARIOS_TABLE}/{backendless_object_id}"
-
-        # 2. Realizar la eliminación
-        response_delete = requests.delete(delete_url, headers=HEADERS)
-        response_delete.raise_for_status()
-        # Backendless devuelve un JSON vacío o un objeto con "deletionTime" en caso de éxito.
-        # No hay un body significativo para devolver más allá del 200 OK.
-        return jsonify({"message": f"Usuario con ID {id} eliminado exitosamente"}), 200
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/data/Cita', methods=['POST'])
-def create_cita():
-    data = request.json
-    try:
-        # Forward the incoming user-token (if present) so Backendless will set
-        # the ownerId of the created record automatically.
-        headers = dict(HEADERS)
-        token = request.headers.get('user-token')
-        if token:
-            headers['user-token'] = token
-
-        response = requests.post(BACKENDLESS_CITA_TABLE, json=data, headers=headers)
+        url = f"{BACKENDLESS_BASE_URL}/users/{user_id}/password"
+        response = requests.put(url, json=data, headers=headers)
         response.raise_for_status()
         return jsonify(response.json()), response.status_code
     except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "message": "Failed to change user password in Backendless"}), 500
 
+# --- AI Agent Endpoint ---
+# Import the new, intelligent agent
 
-@app.route('/data/Cita', methods=['GET'])
-def list_citas():
-    where = request.args.get('where')
-    try:
-        # Use params so requests handles encoding of the where clause correctly
-        params = {'where': where} if where else None
-        response = requests.get(BACKENDLESS_CITA_TABLE, headers=HEADERS, params=params)
-        response.raise_for_status()
-        return jsonify(response.json()), response.status_code
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/data/Cita/<id>', methods=['GET'])
-def get_cita(id):
-    try:
-        response = requests.get(f"{BACKENDLESS_CITA_TABLE}/{id}", headers=HEADERS)
-        response.raise_for_status()
-        return jsonify(response.json()), response.status_code
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/data/Cita/<id>', methods=['PUT'])
-def update_cita(id):
-    data = request.json
-    try:
-        response = requests.put(f"{BACKENDLESS_CITA_TABLE}/{id}", json=data, headers=HEADERS)
-        response.raise_for_status()
-        return jsonify(response.json()), response.status_code
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/data/Cita/<id>', methods=['DELETE'])
-def delete_cita(id):
-    try:
-        response = requests.delete(f"{BACKENDLESS_CITA_TABLE}/{id}", headers=HEADERS)
-        response.raise_for_status()
-        return jsonify({"message": "Cita deleted"}), 200
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/data/Comando', methods=['POST'])
-def process_comando():
-    data = request.json
-    texto = data.get('texto') if data else ''
-    confirm = bool(data.get('confirm')) if data else False
-    # If AI helper is available, use it to parse intent and produce structured result.
-    if ai_process_command:
-        try:
-            parsed = ai_process_command(texto)
-            # Ensure parsed is JSON-serializable
-            # If caller requested confirmation execution and the AI parsed a create/update/delete,
-            # attempt to perform the action against Backendless (server-side execution).
-            if confirm and isinstance(parsed, dict):
-                action = parsed.get('action')
-                resultado = parsed.get('resultado')
-                # Forward user-token if present so Backendless sets ownerId
-                headers = dict(HEADERS)
-                token = request.headers.get('user-token')
-                if token:
-                    headers['user-token'] = token
-
-                # CREATE (existing behavior)
-                if action == 'create' and resultado and isinstance(resultado, dict):
-                    try:
-                        resp = requests.post(BACKENDLESS_CITA_TABLE, json=resultado, headers=headers)
-                        resp.raise_for_status()
-                        created = resp.json()
-                        parsed['executed'] = {'status': 'created', 'record': created}
-                        return jsonify(parsed), 201
-                    except requests.exceptions.RequestException as e:
-                        parsed['executed'] = {'status': 'error', 'message': str(e)}
-                        return jsonify(parsed), 500
-
-                # UPDATE: accept either 'updates' (partial) or 'resultado' (full)
-                if action == 'update':
-                    target = parsed.get('target_id')
-                    body = parsed.get('updates') or resultado
-                    if not target:
-                        # No target id: if query provided, search and return candidates for clarification
-                        if parsed.get('query'):
-                            parsed['candidates'] = _search_citas_by_query(parsed.get('query'))
-                            return jsonify(parsed), 200
-                        parsed['executed'] = {'status': 'error', 'message': 'target_id missing for update'}
-                        return jsonify(parsed), 400
-                    if not body:
-                        parsed['executed'] = {'status': 'error', 'message': 'no updates provided for update'}
-                        return jsonify(parsed), 400
-                    try:
-                        resp = requests.put(f"{BACKENDLESS_CITA_TABLE}/{target}", json=body, headers=headers)
-                        resp.raise_for_status()
-                        updated = resp.json()
-                        parsed['executed'] = {'status': 'updated', 'record': updated}
-                        return jsonify(parsed), 200
-                    except requests.exceptions.RequestException as e:
-                        parsed['executed'] = {'status': 'error', 'message': str(e)}
-                        return jsonify(parsed), 500
-
-                # DELETE: require target_id; if missing try query -> candidates
-                if action == 'delete':
-                    target = parsed.get('target_id')
-                    if not target:
-                        if parsed.get('query'):
-                            parsed['candidates'] = _search_citas_by_query(parsed.get('query'))
-                            return jsonify(parsed), 200
-                        parsed['executed'] = {'status': 'error', 'message': 'target_id missing for delete'}
-                        return jsonify(parsed), 400
-                    try:
-                        resp = requests.delete(f"{BACKENDLESS_CITA_TABLE}/{target}", headers=headers)
-                        resp.raise_for_status()
-                        parsed['executed'] = {'status': 'deleted'}
-                        return jsonify(parsed), 200
-                    except requests.exceptions.RequestException as e:
-                        parsed['executed'] = {'status': 'error', 'message': str(e)}
-                        return jsonify(parsed), 500
-
-            # If not confirming execution, or confirm==False, just return the parsed suggestion
-            return jsonify(parsed), 200
-        except Exception as e:
-            # Return model error to frontend so it can display a helpful message
-            return jsonify({"action": "none", "mensaje": f"Error al procesar comando: {str(e)}", "resultado": None}), 500
-
-    # Fallback: naive echo
-    result = {
-        "action": "none",
-        "mensaje": f"Comando recibido: {texto}",
-        "resultado": None
-    }
-    return jsonify(result), 201
-
-if __name__ == '__main__':
-    app.run(debug=True)
-
-
-def _make_groq_client():
-    """Return an OpenAI-compatible client configured for Groq if available."""
-    if OpenAI is None:
-        return None
-    groq_key = os.environ.get('GROQ_API_KEY')
-    groq_base = os.environ.get('GROQ_BASE_URL', 'https://api.groq.com/openai/v1')
-    return OpenAI(api_key=groq_key, base_url=groq_base)
-
+# --- AI Agent Endpoint ---
 
 @app.route('/api/ai/text', methods=['POST'])
-def api_ai_text():
-    """Process a text instruction via the new ai_agent abstraction."""
+def handle_ai_text():
     data = request.json or {}
-    text = data.get('text') or data.get('texto')
-    user_ctx = data.get('context') or {}
-    if run_text_agent is None:
-        return jsonify({'error': 'AI agent not available'}), 500
+    text = data.get('text')
+    session_id = data.get('session_id')
+    user_token = request.headers.get('user-token')
+
+    # ✅ Validate token FIRST
+    if not user_token:
+        return jsonify({"error": "Authentication token is missing."}), 401
+    
+    if not text:
+        return jsonify({"error": "Text input is required."}), 400
+    
+    if not session_id:
+        session_id = "default_session"
+
     try:
-        parsed = run_text_agent(text, user_ctx)
-        return jsonify(parsed), 200
+        # ✅ Create agent (inherently uses shared checkpointer)
+        current_agent = Agente_de_Citas(session_id=session_id, user_token=user_token)
+        
+        # ✅ No need to reassign — already set in __init__
+        agent_result = current_agent.invoke(text)
+
+        # Map the agent result to the frontend's expected CommandResponse shape
+        mapped = _map_agent_response_to_frontend(agent_result)
+        return jsonify(mapped), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"[ERROR] An error occurred in handle_ai_text: {e}")
+        return jsonify({"error": "An internal error occurred."}), 500
 
-
-@app.route('/api/ai/voice', methods=['POST'])
-def api_ai_voice():
-    """Accepts either JSON {transcript:...} or multipart form with `audio` file.
-    If audio file provided, attempts transcription using Groq via OpenAI client.
+@app.route('/api/session/create', methods=['POST'])
+def create_session():
     """
-    # If transcript provided directly
-    if request.is_json:
-        data = request.json
-        transcript = data.get('transcript') or data.get('texto')
-        user_ctx = data.get('context') or {}
-        if run_voice_agent is None:
-            return jsonify({'error': 'AI agent not available'}), 500
-        return jsonify(run_voice_agent(transcript, user_ctx)), 200
+    Create a new conversation session.
+    """
+    import uuid
+    session_id = str(uuid.uuid4())
+    return jsonify({"session_id": session_id}), 200
 
-    # Else, handle multipart audio upload
-    if 'audio' not in request.files:
-        return jsonify({'error': 'No transcript or audio file provided'}), 400
-    audio = request.files['audio']
-    client = _make_groq_client()
-    if client is None:
-        return jsonify({'error': 'OpenAI/Groq client not available'}), 500
-    try:
-        # Try client helper if available
-        if hasattr(client, 'audio') and hasattr(client.audio, 'transcriptions'):
-            resp = client.audio.transcriptions.create(file=audio, model='whisper-large-v3-turbo')
-            transcript = getattr(resp, 'text', None) or getattr(resp, 'transcript', None) or str(resp)
-        else:
-            # Fallback: call Groq OpenAI-compatible REST endpoint directly
-            groq_base = os.environ.get('GROQ_BASE_URL', 'https://api.groq.com/openai/v1')
-            groq_key = os.environ.get('GROQ_API_KEY')
-            url = groq_base.rstrip('/') + '/audio/transcriptions'
-            files = {'file': (audio.filename, audio.stream, audio.mimetype)}
-            headers = {'Authorization': f'Bearer {groq_key}'}
-            r = requests.post(url, files=files, headers=headers, timeout=60)
-            r.raise_for_status()
-            data = r.json()
-            # Attempt common fields
-            transcript = data.get('text') or data.get('transcript') or json.dumps(data, ensure_ascii=False)
-    except Exception as e:
-        return jsonify({'error': 'Transcription failed: ' + str(e)}), 500
-
-    # Delegate to voice agent
-    if run_voice_agent is None:
-        return jsonify({'error': 'AI agent not available after transcription', 'transcript': transcript}), 500
-    return jsonify(run_voice_agent(transcript, {})), 200
+# --- Health Check ---
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"}), 200
 
 
-@app.route('/api/ai/plan', methods=['POST'])
-def api_ai_plan():
-    data = request.json or {}
-    goal = data.get('goal')
-    window = data.get('window')
-    prefs = data.get('preferences')
-    if create_plan_events is None:
-        return jsonify({'error': 'Plan generator not available'}), 500
-    try:
-        events = create_plan_events(goal, window, prefs)
-        return jsonify({'plan': events}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+@app.route('/debug/tokens', methods=['GET'])
+def debug_tokens():
+    """Return masked token->user mappings for debugging (development only)."""
+    def mask_token(t: str) -> str:
+        if not t: return None
+        if len(t) <= 8: return '****'
+        return t[:4] + '...' + t[-4:]
 
+    masked = {mask_token(k): v for k, v in _TOKEN_TO_USER.items()}
+    return jsonify({'mappings': masked, 'count': len(_TOKEN_TO_USER)}), 200
 
-# --- OAuth / Integrations stubs (Google / Outlook) ---
-@app.route('/integrations/google/start', methods=['GET'])
-def integrations_google_start():
-    # Redirect the user to Google OAuth consent screen (server should implement)
-    return jsonify({'message': 'TODO: implement Google OAuth start endpoint'}), 501
-
-
-@app.route('/integrations/google/callback', methods=['GET'])
-def integrations_google_callback():
-    # Exchange code for tokens and persist them securely (TODO)
-    return jsonify({'message': 'TODO: implement Google OAuth callback endpoint'}), 501
-
-
-@app.route('/integrations/outlook/start', methods=['GET'])
-def integrations_outlook_start():
-    return jsonify({'message': 'TODO: implement Outlook OAuth start endpoint'}), 501
-
-
-@app.route('/integrations/outlook/callback', methods=['GET'])
-def integrations_outlook_callback():
-    return jsonify({'message': 'TODO: implement Outlook OAuth callback endpoint'}), 501
+if __name__ == '__main__':
+    # Makes the server accessible on your local network
+    app.run(host='0.0.0.0', port=5000, debug=True)

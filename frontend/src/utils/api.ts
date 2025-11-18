@@ -1,91 +1,37 @@
 /**
  * MNA API Client
- * Handles all API communication with the Backendless backend
- * via the Flask proxy at http://localhost:5000
- * 
- * IMPORTANT: By default, this uses MOCK DATA for development/demo.
- * To connect to a real backend:
- * 1. Set USE_MOCK_DATA = false
- * 2. Ensure your backend is running at API_BASE_URL
- * 3. Verify all endpoints match the API specification
+ * Connects to the Flask backend at http://localhost:5000
+ * NO MOCK DATA - Always uses real backend
  */
 
 // Configuration
-// Prefer Vite env var `VITE_API_BASE` (set in frontend/.env or via dev server).
-// Falls back to localhost:5000 for local backend.
 const API_BASE_URL: string = (import.meta.env && import.meta.env.VITE_API_BASE) || 'http://localhost:5000';
 
-// ============================================================
-// MOCK MODE CONFIGURATION
-// ============================================================
-// Set to true: Use mock data (no backend needed - DEMO MODE)
-// Set to false: Connect to real backend at API_BASE_URL
-// ============================================================
-// Set to `true` to run the frontend in mock/demo mode without contacting the backend.
-// For integration with the running Flask backend, set this to `false` or configure
-// the environment variable `VITE_USE_MOCK_DATA=true` to override.
-const USE_MOCK_DATA = (import.meta.env && import.meta.env.VITE_USE_MOCK_DATA === 'true') ? true : false;
-// ============================================================
+// Disable mock data in frontend — always use real backend
+const USE_MOCK_DATA = false;
 
-// Mock data storage (simulates a database)
-let mockCitas: Cita[] = [
-  {
-    objectId: '1',
-    titulo: 'Cita con dentista',
-    fecha: '2025-11-20',
-    hora_inicio: '10:00',
-    lugar: 'Clínica Dental Centro',
-    descripcion: 'Revisión anual y limpieza',
-    notificacion: {
-      activa: true,
-      mensaje: 'Tu cita con el dentista es en 30 minutos',
-      tiempo_anticipacion: 30,
-    },
-    created: new Date().toISOString(),
-    updated: new Date().toISOString(),
-  },
-  {
-    objectId: '2',
-    titulo: 'Reunión con equipo',
-    fecha: '2025-11-18',
-    hora_inicio: '14:00',
-    lugar: 'Oficina - Sala de Juntas',
-    descripcion: 'Planificación del proyecto Q1 2026',
-    notificacion: {
-      activa: true,
-      mensaje: 'Reunión de equipo en 15 minutos',
-      tiempo_anticipacion: 15,
-    },
-    created: new Date().toISOString(),
-    updated: new Date().toISOString(),
-  },
-  {
-    objectId: '3',
-    titulo: 'Cita médica general',
-    fecha: '2025-11-25',
-    hora_inicio: '09:30',
-    lugar: 'Hospital Central',
-    descripcion: 'Chequeo médico rutinario',
-    notificacion: {
-      activa: true,
-      mensaje: 'Recordatorio: Cita médica en 1 hora',
-      tiempo_anticipacion: 60,
-    },
-    created: new Date().toISOString(),
-    updated: new Date().toISOString(),
-  },
-];
+// Declarations for optional mock objects (present in demo/figma code).
+// Keeping these declarations prevents TypeScript compile errors when
+// `USE_MOCK_DATA` branches exist but mock implementations are not included.
+declare const mockApi: any;
+declare const mockUser: any;
+// Session management
+let _currentSessionId: string | null = null;
 
-let mockUser: Usuario | null = {
-  objectId: 'mock-user-123',
-  email: 'usuario@demo.com',
-  nombre: 'Usuario Demo',
-  instrucciones_agente: '• Prefiero citas por la mañana entre 9am-12pm\n• Las citas médicas siempre en Hospital Central\n• Recordatorios de 1 hora para citas médicas\n• No agendar los viernes por la tarde',
-  created: new Date().toISOString(),
-  updated: new Date().toISOString(),
-};
+export function setSessionId(sessionId: string | null) {
+  _currentSessionId = sessionId;
+  if (sessionId) {
+    localStorage.setItem('mna_session_id', sessionId);
+  } else {
+    localStorage.removeItem('mna_session_id');
+  }
+}
 
-let mockToken = 'mock-token-' + Date.now();
+export function getSessionId(): string | null {
+  if (_currentSessionId) return _currentSessionId;
+  _currentSessionId = localStorage.getItem('mna_session_id');
+  return _currentSessionId;
+}
 
 // Type definitions matching the API contract
 export interface Usuario {
@@ -126,11 +72,59 @@ export interface CommandResponse {
   respuesta: string;
   mensaje?: string;
   resultado?: Cita | any;
+  session_id?: string;
 }
 
 export interface ApiError {
   code?: number;
   message: string;
+}
+
+/**
+ * Normalize a date value coming from the backend or mock data into
+ * a canonical `YYYY-MM-DD` string the calendar expects.
+ * Accepts: numeric timestamps (ms), numeric strings, ISO strings, or
+ * already-correct `YYYY-MM-DD` strings.
+ */
+function normalizeFecha(value: any): string {
+  if (value === null || value === undefined || value === '') return '';
+
+  // number (ms since epoch)
+  if (typeof value === 'number') {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return '';
+  }
+
+  // numeric string timestamp
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const n = parseInt(trimmed, 10);
+      const d = new Date(n);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    }
+
+    // ISO-like string or full datetime
+    const d2 = new Date(trimmed);
+    if (!isNaN(d2.getTime())) return d2.toISOString().slice(0, 10);
+
+    // Already YYYY-MM-DD?
+    const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  }
+
+  return '';
+}
+
+/**
+ * Ensure a Cita object has a normalized `fecha` field.
+ */
+function normalizeCita(cita: Cita): Cita {
+  return {
+    ...cita,
+    fecha: normalizeFecha((cita as any).fecha) || cita.fecha || '',
+  };
 }
 
 /**
@@ -190,19 +184,33 @@ async function apiFetch<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = getAuthToken();
-  const headers: HeadersInit = {
+  const headersObj: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers || {}),
   };
 
+  // Normalize options.headers (Headers | [string,string][] | Record<string,string>) into a plain object
+  if (options.headers) {
+    if (typeof Headers !== 'undefined' && options.headers instanceof Headers) {
+      (options.headers as Headers).forEach((value, key) => {
+        headersObj[key] = value;
+      });
+    } else if (Array.isArray(options.headers)) {
+      (options.headers as [string, string][]).forEach(([k, v]) => {
+        headersObj[k] = v;
+      });
+    } else {
+      Object.assign(headersObj, options.headers as Record<string, string>);
+    }
+  }
+
   if (token) {
-    headers['user-token'] = token;
+    headersObj['user-token'] = token;
   }
 
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
-      headers,
+      headers: headersObj,
     });
 
     if (!response.ok) {
@@ -224,161 +232,6 @@ async function apiFetch<T>(
     } as ApiError;
   }
 }
-
-/**
- * Mock API Functions
- * These simulate backend operations for development/demo
- */
-const mockDelay = () => new Promise(resolve => setTimeout(resolve, 300));
-
-const mockApi = {
-  // Auth operations
-  register: async (payload: { email: string; password: string; nombre: string }): Promise<Usuario> => {
-    await mockDelay();
-    mockUser = {
-      objectId: 'user-' + Date.now(),
-      email: payload.email,
-      nombre: payload.nombre,
-      created: new Date().toISOString(),
-      updated: new Date().toISOString(),
-    };
-    mockToken = 'token-' + Date.now();
-    return mockUser;
-  },
-
-  login: async (payload: { login: string; password: string }): Promise<LoginResponse> => {
-    await mockDelay();
-    if (!mockUser) {
-      throw { code: 401, message: 'Usuario no encontrado' } as ApiError;
-    }
-    mockToken = 'token-' + Date.now();
-    return {
-      objectId: mockUser.objectId!,
-      email: mockUser.email,
-      nombre: mockUser.nombre,
-      'user-token': mockToken,
-    };
-  },
-
-  updateUser: async (id: string, payload: Partial<Usuario>): Promise<Usuario> => {
-    await mockDelay();
-    if (!mockUser) {
-      throw { code: 404, message: 'Usuario no encontrado' } as ApiError;
-    }
-    mockUser = { ...mockUser, ...payload, updated: new Date().toISOString() };
-    return mockUser;
-  },
-
-  changePassword: async (): Promise<{ message: string }> => {
-    await mockDelay();
-    return { message: 'Password updated successfully' };
-  },
-
-  // Citas operations
-  createCita: async (payload: any): Promise<Cita> => {
-    await mockDelay();
-    const newCita: Cita = {
-      ...payload,
-      objectId: 'cita-' + Date.now(),
-      created: new Date().toISOString(),
-      updated: new Date().toISOString(),
-    };
-    mockCitas.push(newCita);
-    return newCita;
-  },
-
-  listCitas: async (): Promise<Cita[]> => {
-    await mockDelay();
-    return [...mockCitas].sort((a, b) => {
-      const dateA = new Date(a.fecha + 'T' + a.hora_inicio);
-      const dateB = new Date(b.fecha + 'T' + b.hora_inicio);
-      return dateA.getTime() - dateB.getTime();
-    });
-  },
-
-  getCita: async (id: string): Promise<Cita> => {
-    await mockDelay();
-    const cita = mockCitas.find(c => c.objectId === id);
-    if (!cita) {
-      throw { code: 404, message: 'Cita no encontrada' } as ApiError;
-    }
-    return cita;
-  },
-
-  updateCita: async (id: string, payload: Partial<Cita>): Promise<Cita> => {
-    await mockDelay();
-    const index = mockCitas.findIndex(c => c.objectId === id);
-    if (index === -1) {
-      throw { code: 404, message: 'Cita no encontrada' } as ApiError;
-    }
-    mockCitas[index] = {
-      ...mockCitas[index],
-      ...payload,
-      updated: new Date().toISOString(),
-    };
-    return mockCitas[index];
-  },
-
-  deleteCita: async (id: string): Promise<void> => {
-    await mockDelay();
-    const index = mockCitas.findIndex(c => c.objectId === id);
-    if (index === -1) {
-      throw { code: 404, message: 'Cita no encontrada' } as ApiError;
-    }
-    mockCitas.splice(index, 1);
-  },
-
-  // Command processing
-  processCommand: async (texto: string): Promise<CommandResponse> => {
-    await mockDelay();
-    
-    // Simple command parsing for demo
-    const lower = texto.toLowerCase();
-    
-    // Parse date
-    let fecha = new Date();
-    if (lower.includes('mañana')) {
-      fecha.setDate(fecha.getDate() + 1);
-    } else if (lower.includes('próximo') || lower.includes('proximo')) {
-      fecha.setDate(fecha.getDate() + 7);
-    }
-    
-    // Parse time
-    let hora = '10:00';
-    const timeMatch = texto.match(/(\d{1,2}):?(\d{2})?\s*(am|pm)?/i);
-    if (timeMatch) {
-      let hours = parseInt(timeMatch[1]);
-      const minutes = timeMatch[2] || '00';
-      const meridiem = timeMatch[3]?.toLowerCase();
-      
-      if (meridiem === 'pm' && hours < 12) hours += 12;
-      if (meridiem === 'am' && hours === 12) hours = 0;
-      
-      hora = `${hours.toString().padStart(2, '0')}:${minutes}`;
-    }
-    
-    // Extract title
-    let titulo = 'Nueva cita';
-    if (lower.includes('dentista')) titulo = 'Cita con dentista';
-    else if (lower.includes('médico') || lower.includes('medico')) titulo = 'Cita médica';
-    else if (lower.includes('reunión') || lower.includes('reunion')) titulo = 'Reunión';
-    
-    const resultado: Cita = {
-      titulo,
-      fecha: fecha.toISOString().split('T')[0],
-      hora_inicio: hora,
-      lugar: 'Por definir',
-      descripcion: '',
-    };
-    
-    return {
-      exito: true,
-      respuesta: `He interpretado tu comando. ¿Quieres crear esta cita?`,
-      mensaje: `Cita "${titulo}" para el ${resultado.fecha} a las ${hora}`,
-      resultado,
-    };
-  },
-};
 
 /**
  * Auth API
@@ -509,53 +362,54 @@ export const authApi = {
  * Citas API
  */
 export const citasApi = {
-  /**
-   * Create a new cita
-   * POST /data/Cita
-   */
-  create: async (payload: {
-    titulo: string;
-    fecha: string;
-    hora_inicio: string;
-    lugar: string;
-    descripcion?: string;
-  }): Promise<Cita> => {
+  // Create a new cita
+  create: async (payload: Partial<Cita>): Promise<Cita> => {
     if (USE_MOCK_DATA) {
       return mockApi.createCita(payload);
     }
-    return apiFetch<Cita>('/data/Cita', {
+    const resp = await apiFetch<Cita>(`/data/Cita`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+    return normalizeCita(resp);
   },
 
   /**
-   * Get list of citas
-   * GET /data/Cita?where=...
+   * Get list of citas.
+   * This is the MODIFIED function.
+   * It now ALWAYS filters by the logged-in user's objectId and combines
+   * any additional queries from the agent.
    */
   list: async (where?: string): Promise<Cita[]> => {
     if (USE_MOCK_DATA) {
       return mockApi.listCitas();
     }
-    // If no explicit where clause provided, attempt to restrict to the
-    // authenticated user's appointments to avoid leaking other users' data.
-    // The backend expects a `where` query like: ownerId='CURRENT_USER_ID'
-    let finalWhere = where;
-    if (!finalWhere) {
-      const currentUser = getUserData();
-      if (currentUser && currentUser.objectId) {
-        finalWhere = `ownerId = '${currentUser.objectId}'`;
-      }
-    }
-    // If we still don't have a where clause and there's no logged-in user,
-    // return an empty list rather than requesting all citas (prevents data leakage).
-    if (!finalWhere) {
+
+    // 1. Get the current user's data from localStorage.
+    const currentUser = getUserData();
+
+    // 2. If there is no logged-in user, return an empty array to prevent data leaks.
+    if (!currentUser || !currentUser.objectId) {
+      console.warn("citasApi.list called without a logged-in user. Returning empty list.");
       return [];
     }
+
+    // 3. ALWAYS start by creating the mandatory filter for the logged-in user.
+    const ownerIdFilter = `ownerId = '${currentUser.objectId}'`;
+
+    // 4. Combine it with any additional 'where' clause provided by the agent.
+    let finalWhere = ownerIdFilter;
+    if (where) {
+      // If the agent wants to filter too, combine them with AND.
+      finalWhere = `${ownerIdFilter} AND (${where})`;
+    }
+
+    // 5. Build the final query and make the API call.
     const queryParams = `?where=${encodeURIComponent(finalWhere)}`;
-    return apiFetch<Cita[]>(`/data/Cita${queryParams}`, {
+    const resp = await apiFetch<Cita[]>(`/data/Cita${queryParams}`, {
       method: 'GET',
     });
+    return resp.map(normalizeCita);
   },
 
   /**
@@ -564,11 +418,13 @@ export const citasApi = {
    */
   get: async (id: string): Promise<Cita> => {
     if (USE_MOCK_DATA) {
-      return mockApi.getCita(id);
+      const c = await mockApi.getCita(id);
+      return normalizeCita(c);
     }
-    return apiFetch<Cita>(`/data/Cita/${id}`, {
+    const resp = await apiFetch<Cita>(`/data/Cita/${id}`, {
       method: 'GET',
     });
+    return normalizeCita(resp);
   },
 
   /**
@@ -577,12 +433,14 @@ export const citasApi = {
    */
   update: async (id: string, payload: Partial<Cita>): Promise<Cita> => {
     if (USE_MOCK_DATA) {
-      return mockApi.updateCita(id, payload);
+      const c = await mockApi.updateCita(id, payload);
+      return normalizeCita(c);
     }
-    return apiFetch<Cita>(`/data/Cita/${id}`, {
+    const resp = await apiFetch<Cita>(`/data/Cita/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+    return normalizeCita(resp);
   },
 
   /**
@@ -600,20 +458,80 @@ export const citasApi = {
 };
 
 /**
- * Command API (Natural Language Processing)
+ * Command API (Natural Language Processing via AI Agent)
  */
 export const commandApi = {
   /**
-   * Process a natural language command
-   * POST /data/Comando
+   * Process a natural language command via the new ai_agent with session management
+   * POST /api/ai/text
    */
   process: async (texto: string): Promise<CommandResponse> => {
-    if (USE_MOCK_DATA) {
-      return mockApi.processCommand(texto);
+    const sessionId = getSessionId();
+    const body: any = { text: texto };
+    if (sessionId) {
+      body.session_id = sessionId;
     }
-    return apiFetch<CommandResponse>('/data/Comando', {
+    
+    const response = await apiFetch<CommandResponse>('/api/ai/text', {
       method: 'POST',
-      body: JSON.stringify({ texto }),
+      body: JSON.stringify(body),
+    });
+    
+    // Update session ID if returned from backend
+    if (response.session_id) {
+      setSessionId(response.session_id);
+    }
+    
+    return response;
+  },
+
+  /**
+   * Process a command and optionally request server-side execution (confirm=true)
+   */
+  processWithConfirm: async (texto: string, confirm: boolean = false): Promise<CommandResponse> => {
+    const sessionId = getSessionId();
+    const body: any = { text: texto, confirm };
+    if (sessionId) {
+      body.session_id = sessionId;
+    }
+    
+    const response = await apiFetch<CommandResponse>('/api/ai/text', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    
+    // Update session ID if returned from backend
+    if (response.session_id) {
+      setSessionId(response.session_id);
+    }
+    
+    return response;
+  },
+
+  /**
+   * Create a new conversation session
+   */
+  createSession: async (): Promise<{ session_id: string }> => {
+    return apiFetch<{ session_id: string }>('/api/session/create', {
+      method: 'POST',
+    });
+  },
+
+  /**
+   * Get session information
+   */
+  getSession: async (sessionId: string): Promise<any> => {
+    return apiFetch<any>(`/api/session/${sessionId}`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Get conversation history
+   */
+  getHistory: async (sessionId: string): Promise<any> => {
+    return apiFetch<any>(`/api/session/${sessionId}/history`, {
+      method: 'GET',
     });
   },
 };
