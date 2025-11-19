@@ -15,6 +15,7 @@ interface DashboardProps {
   onProcessCommand: (texto: string) => Promise<CommandResponse>;
   onNavigate: (page: string, params?: any) => void;
   userName?: string;
+  
 }
 
 interface Message {
@@ -253,9 +254,16 @@ export function Dashboard({ citas, onProcessCommand, onNavigate, userName }: Das
 
       setMessages((prev) => [...prev, agentMessage]);
       
+      
       // Show confetti for successful actions
       if (response.exito) {
         setShowConfetti(true);
+      }
+      // Notify other parts of the UI (citas list, notifications) that the agent responded
+      try {
+        window.dispatchEvent(new CustomEvent('agent:response', { detail: { success: response.exito } }));
+      } catch (e) {
+        // ignore in older browsers
       }
     } catch (error) {
       const errorMessage: Message = {

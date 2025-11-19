@@ -257,11 +257,37 @@ def update_cita(object_id):
 @app.route('/data/Cita/<string:object_id>', methods=['DELETE'])
 def delete_cita(object_id):
     user_token = request.headers.get('user-token')
-    if not get_user_id_from_token(user_token):
+    # Validate token and get user object id (needed to scope notification deletion)
+    user_object_id = get_user_id_from_token(user_token)
+    if not user_object_id:
         return jsonify({"error": "Invalid or expired token."}), 401
 
+    headers = {'user-token': user_token} if user_token else {}
+
+    # 1) Attempt to delete any notifications related to this cita for this user.
+    #    We try multiple common field names that the frontend/backend may use
+    #    to reference a cita on a notification record.
     try:
-        headers = {'user-token': user_token}
+        owner_filter = f"ownerId = '{user_object_id}'"
+        cita_filters = (
+            f"citaObjectId = '{object_id}' OR cita_object_id = '{object_id}' OR cita = '{object_id}'"
+        )
+        where_clause = f"{owner_filter} AND ({cita_filters})"
+        params = {'where': where_clause}
+        # Backendless supports DELETE with a `where` param to remove multiple records.
+        notif_url = BACKENDLESS_NOTIF_TABLE_URL
+        notif_resp = requests.delete(notif_url, params=params, headers=headers, timeout=10)
+        if notif_resp.status_code >= 400:
+            # Log and continue — do not block cita deletion on notification cleanup failure
+            print(f"[WARN] Failed to delete related notifications for cita {object_id}: status={notif_resp.status_code} body={notif_resp.text}")
+        else:
+            print(f"[DEBUG] Deleted related notifications for cita {object_id}: status={notif_resp.status_code} body={notif_resp.text}")
+    except requests.exceptions.RequestException as e:
+        # Log the exception but proceed to delete the cita itself.
+        print(f"[ERROR] Exception while deleting related notifications for cita {object_id}: {e}")
+
+    # 2) Delete the cita itself
+    try:
         url = f"{BACKENDLESS_CITA_TABLE_URL}/{object_id}"
         response = requests.delete(url, headers=headers)
         response.raise_for_status()

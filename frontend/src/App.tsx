@@ -56,6 +56,18 @@ export default function App() {
     }
   }, []);
 
+  // Listen for global agent responses and refresh citas list
+  useEffect(() => {
+    const handler = (e: any) => {
+      // allow backend changes to settle briefly
+      setTimeout(() => {
+        void loadCitas();
+      }, 300);
+    };
+    window.addEventListener('agent:response', handler as EventListener);
+    return () => window.removeEventListener('agent:response', handler as EventListener);
+  }, []);
+
   // Load citas when user logs in
   useEffect(() => {
     if (currentUser) {
@@ -78,6 +90,8 @@ export default function App() {
       setIsLoadingCitas(false);
     }
   };
+
+  
 
   const handleLogin = async (email: string, password: string) => {
     const response = await api.auth.login({ login: email, password });

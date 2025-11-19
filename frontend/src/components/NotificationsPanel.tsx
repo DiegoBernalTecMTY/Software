@@ -47,6 +47,18 @@ export function NotificationsPanel({ citas = [], onNavigate }: NotificationsPane
     void loadNotifs();
   }, []);
 
+  // Listen for global agent response events to refresh notifications
+  useEffect(() => {
+    const handler = (e: any) => {
+      // small delay to allow backend to settle
+      setTimeout(() => {
+        void loadNotifs();
+      }, 300);
+    };
+    window.addEventListener('agent:response', handler as EventListener);
+    return () => window.removeEventListener('agent:response', handler as EventListener);
+  }, []);
+
   // Sort by schedule or cita date/time (upcoming first)
   const now = new Date();
   const items = (notifs || []).map((n) => {
